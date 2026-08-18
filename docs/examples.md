@@ -1,7 +1,7 @@
 # Examples
 
-The repository includes small runnable examples under `examples/`. Run them
-from the repository root after installing the package:
+This unit includes small runnable examples under `examples/`. Run them from the
+unit root, `sidecar-edits/`, after installing the package:
 
 ```bash
 python -m pip install -e .
@@ -22,8 +22,11 @@ asset, and replaces one include path.
 sidecar-render examples/apply_patch/edits.py /tmp/sidecar_apply_patch_run
 ```
 
-This exercises `extract_subckts`, literal replacement, regex replacement,
-system `patch`, and `apply_patch`.
+This exercises `extract_subckts`, `copy_file`, literal replacement, regex
+replacement, system `patch`, and `apply_patch`. It also uses `COPY_IGNORE` to
+leave stale `psf/` output and `*.tmp` scratch files behind in the base tree, and
+loads its parameters from `params.json`. Because it defines one named parameter
+set, it renders `/tmp/sidecar_apply_patch_run_tt_1v2`.
 
 ## Parameter Matrix
 
@@ -31,8 +34,10 @@ system `patch`, and `apply_patch`.
 sidecar-render examples/param_matrix/edits.py /tmp/sidecar_matrix_run
 ```
 
-This renders named parameter sets and explicit voltage/temperature matrix
-combinations.
+This renders two named process corners against an explicit voltage and
+temperature matrix — six run directories per corner, with the slow corner
+redirected by `targetdir` to `/tmp/custom_ss_sweep`. See
+[Parameter Sets and Matrices](parameter-sets.md) for the rules it follows.
 
 ## Excel PWL Sources
 

@@ -8,20 +8,6 @@ operations, and writes one or more concrete run directories. The suggested edit
 file name is `edits.py`, and the interface is plain Python while still providing
 source-location error reports.
 
-```{toctree}
-:maxdepth: 2
-:caption: Contents
-
-user-guide
-examples
-api
-design/edits-api
-design/brainstorming
-design/pwl-table-sources
-```
-
-## Minimal Example
-
 ```python
 from sidecar_edits import edits
 
@@ -50,25 +36,34 @@ Render the basic example:
 sidecar-render examples/basic/edits.py /tmp/sidecar_example_run
 ```
 
-Build the unit documentation when updating its source:
+## Start here
 
-```bash
-python -m pip install -e ".[docs]"
-python -m sphinx -b html docs docs/_build/html
-```
-
-## Main Sections
-
-- [User Guide](user-guide.md): how to author an edit file, format parameters,
-  inject generated sources, and read errors.
-- [Examples](examples.md): runnable edit files included in the repository,
-  including Excel-backed PWL source generation.
-- [API Reference](api): generated signatures and docstrings for the edits API
-  and PWL table helpers.
-- [Design Notes](design/edits-api.md): implementation model and maintainer
-  constraints for the edits API.
+| If you want to | Read |
+| --- | --- |
+| author an edit file, format parameters, inject sources, read errors | [User guide](user-guide.md) |
+| render many runs from one file: corners, sweeps, output layout | [Parameter sets and matrices](parameter-sets.md) |
+| see it working end to end, including Excel-backed PWL sources | [Examples](examples.md) |
+| look up a helper's signature or a PWL type | [API reference](api.rst) |
+| work *on* this package rather than with it | [Internals](internals.md) |
 
 ```{note}
 This project is intentionally small and text-first. It favors explicit,
 reviewable edits over a full simulator netlist model.
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Using Sidecar Edits
+
+user-guide
+parameter-sets
+examples
+api
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Working on Sidecar Edits
+
+internals
 ```

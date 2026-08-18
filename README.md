@@ -2,7 +2,7 @@
 
 Sidecar Edits is the simulation-directory preparation unit of
 [Analog Sim Studies](../README.md). Its contract and exclusions are recorded in
-[ONTOLOGY.md](ONTOLOGY.md); the parent vision remains in
+[ONTOLOME.md](ONTOLOME.md); the parent vision remains in
 [`../MANIFESTO.md`](../MANIFESTO.md).
 
 ## Layout
@@ -13,7 +13,35 @@ Sidecar Edits is the simulation-directory preparation unit of
 - `examples/param_matrix/` contains a named parameter-set plus matrix example
 - `examples/pwl_excel/` contains an Excel-backed PWL source generation example
 - `tests/` contains the unit's pytest coverage
-- `docs/` contains the user/API guide and sidecar-specific design material
+- `docs/` contains the published user guide, API reference, and internals
+- `design/` contains the unpublished design record
+
+## Documentation
+
+[`docs/`](docs/index.md) is the guide, built into the project's Sphinx site by
+`python composition.py docs` from the repository root. Start at the
+[user guide](docs/user-guide.md), then
+[parameter sets and matrices](docs/parameter-sets.md) and the
+[examples](docs/examples.md); [internals](docs/internals.md) is for working *on*
+the package.
+
+Two neighbouring surfaces are deliberately not part of that site.
+[`ONTOLOME.md`](ONTOLOME.md) states the contracts this unit currently
+guarantees, and is where a change to a contract must be recorded.
+[`design/`](design/README.md) holds proposals and dated idea notes — not
+maintained against the code, and never to be cited as evidence of how it now
+behaves.
+
+To build and preview the unit guide on its own:
+
+```bash
+python -m pip install -e ".[docs]"
+python -m sphinx -b html docs docs/_build/html
+python -m http.server --directory docs/_build/html 8000
+```
+
+Generated HTML is ignored rather than tracked; both commands consume authored
+sources here.
 
 ## Install From A Fresh Workspace
 
@@ -108,8 +136,10 @@ The `apply_patch` operation uses the installed `apply_patch` executable from
 
 Every edit operation may include an optional `description`. It should describe
 the intended edit, for example `add run label to notes`, not the command or tool
-used to perform it. Required edits fail by default; set `optional: True` only
-when a skipped edit is acceptable.
+used to perform it. Edits fail the render by default. The operations that shell
+out — `extract_subckts`, `run`, `patch`, and `apply_patch` — accept
+`optional=True` for the case where skipping is genuinely acceptable, and
+`replace` and `regex_replace` accept `allow_no_match=True` for an absent target.
 
 Edit operations are created through the `sidecar_edits.edits` namespace:
 
@@ -158,8 +188,10 @@ autocomplete and `help(sidecar_edits.edits.replace)` can show the available
 arguments. Raw dictionary edit entries are not supported by the renderer.
 
 Parameters are defined inside the edit file, not assembled on the command line.
-The suggested filename is `edits.py`. For a single run, use inline common
-parameters:
+The suggested filename is `edits.py`. The full rules — merge order, output
+layout, `COPY_IGNORE`, environment-variable expansion — are in
+[parameter sets and matrices](docs/parameter-sets.md); what follows is the
+shape. For a single run, use inline common parameters:
 
 ```python
 COMMON_PARAMS = {
@@ -229,24 +261,6 @@ Run the tests:
 python -m pip install pytest
 python -m pytest -q
 ```
-
-## Local Documentation
-
-Install the documentation extras and build the unit guide:
-
-```bash
-python -m pip install -e ".[docs]"
-python -m sphinx -b html docs docs/_build/html
-```
-
-Preview the generated HTML with:
-
-```bash
-python -m http.server --directory docs/_build/html 8000
-```
-
-The aggregate parent build is `python ../composition.py docs`. Generated HTML
-is ignored rather than tracked; both commands consume authored sources here.
 
 ## Manual Build Flow
 
