@@ -124,6 +124,22 @@ def test_append_to_file_helper_returns_typed_edit_object() -> None:
     assert spec.source_stack[0].path == Path(__file__).resolve()
 
 
+def test_run_helper_returns_typed_edit_object() -> None:
+    from sidecar_edits import edits
+
+    spec = edits.run(
+        command=["$TOOL_ROOT/bin/retarget", "input.scs", "{corner}"],
+        description="retarget the deck",
+    )
+
+    assert spec.op == "run"
+    assert spec.command == ["$TOOL_ROOT/bin/retarget", "input.scs", "{corner}"]
+    assert spec.description == "retarget the deck"
+    assert spec.optional is False
+    assert edits.is_edit_spec(spec)
+    assert spec.source_stack[0].path == Path(__file__).resolve()
+
+
 def test_helper_signatures_reject_unknown_fields_by_normal_python_call_behavior() -> None:
     from sidecar_edits import edits
 

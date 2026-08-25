@@ -141,12 +141,19 @@ The `sidecar_edits.edits` namespace exposes typed helpers for:
 - `extract_subckts`, `copy_file`, `rename_file`, `write_file`, and `append_to_file`;
 - `insert_series_source_at_instance_net`;
 - `replace` and `regex_replace`; and
-- `patch` and `apply_patch`.
+- `run`, `patch`, and `apply_patch`.
 
-Every operation is a file transformation. Arbitrary command execution is not an
-edit capability; launch simulators and workflows from the execution component.
-`patch`, `apply_patch`, and the extraction helper may invoke a tool only to
-perform their declared file transformation.
+Every operation is a file transformation. `run`, `patch`, `apply_patch`, and the
+extraction helper reach an external tool to perform one, and `run` is the escape
+hatch for a transformation this vocabulary does not name -- a site's own netlist
+munger, an awk one-liner, a generator script. It is not a way to launch
+simulators or evaluate results: those run a materialized directory rather than
+building one, and belong to the execution component.
+
+What `run` gives up is inspection. A resolved plan shows the command it will
+execute, not what that command will do, so a plan carrying one is reviewable
+only as far as the command name. Prefer a named operation wherever one fits, and
+keep the command a pure function of the run directory.
 
 `copy_file` requires an absolute source path obtained from `ctx.requires`.
 `rename_file` instead selects a file the base copy already placed in the
@@ -160,8 +167,8 @@ Destination and target paths are inside the rendered tree. Parameter formatting
 uses `{name}` fields. Path fields additionally expand environment variables;
 replacement content does not, preserving simulator-side variables.
 
-Edits fail by default. Patch and extraction operations accept `optional=True`
-only when skipping is genuinely valid. Text replacement accepts
+Edits fail by default. The command, patch, and extraction operations accept
+`optional=True` only when skipping is genuinely valid. Text replacement accepts
 `allow_no_match=True` for an intentionally absent target.
 
 ## Error reporting

@@ -49,8 +49,8 @@ inputs. Its examples demonstrate the current end-to-end slice.
 ## Exclusions
 
 It does not parse a canonical circuit graph, decompose circuit function, launch
-simulators or arbitrary commands as edits, evaluate results, expand embedded
-study invocations, schedule studies, or own project-wide policy.
+simulators, evaluate results, expand embedded study invocations, schedule
+studies, or own project-wide policy.
 
 ## Child composition
 

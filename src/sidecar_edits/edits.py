@@ -211,6 +211,21 @@ class RegexReplaceEdit:
 
 
 @dataclass(frozen=True)
+class RunEdit:
+    op: Literal["run"]
+    command: list[str]
+    description: str | None
+    optional: bool
+    source_stack: tuple[SourceFrame, ...]
+
+    def apply(self, context: RenderContext) -> None:
+        from sidecar_edits import render
+
+        command = [render.format_path_text(str(arg), context.params) for arg in self.command]
+        render.run_command_args(context.target_dir, command, self.optional, edit_description(self))
+
+
+@dataclass(frozen=True)
 class PatchEdit:
     op: Literal["patch"]
     patch: str
@@ -267,6 +282,7 @@ EditSpec: TypeAlias = (
     | InsertSeriesSourceAtInstanceNetEdit
     | ReplaceEdit
     | RegexReplaceEdit
+    | RunEdit
     | PatchEdit
     | ApplyPatchEdit
 )
@@ -578,6 +594,45 @@ def regex_replace(
     )
 
 
+def run(
+    *,
+    command: list[str],
+    description: str | None = None,
+    optional: bool = False,
+) -> RunEdit:
+    """Transform the rendered run directory with an external command.
+
+    The escape hatch for a transformation this vocabulary does not name: a
+    site's own netlist munger, an awk one-liner, a generator script. Each
+    argument is converted to text, formatted with render parameters, and
+    expanded for environment variables. The command runs with the rendered run
+    directory as its working directory, and a non-zero exit fails the edit with
+    the command's own stderr.
+
+    It is not a way to launch simulators or evaluate results; those run a
+    materialized directory rather than building one. What it gives up is
+    inspection: a plan shows the command it will execute, not what that command
+    will do, so prefer a named operation wherever one fits.
+
+    Set ``optional=True`` only when it is acceptable to skip the command if it
+    is missing or exits unsuccessfully.
+
+    Example::
+
+        edits.run(
+            command=["$PDK_TOOLS/bin/retarget", "input.scs", "{corner}"],
+            description="retarget the deck to this corner",
+        )
+    """
+    return RunEdit(
+        op="run",
+        command=command,
+        description=description,
+        optional=optional,
+        source_stack=_capture_source_stack(),
+    )
+
+
 def patch(
     *,
     patch: str,
@@ -659,6 +714,7 @@ def is_edit_spec(value: object) -> bool:
             InsertSeriesSourceAtInstanceNetEdit,
             ReplaceEdit,
             RegexReplaceEdit,
+            RunEdit,
             PatchEdit,
             ApplyPatchEdit,
         ),

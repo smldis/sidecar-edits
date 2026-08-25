@@ -541,6 +541,71 @@ def test_rename_file_refuses_an_occupied_or_escaping_destination(tmp_path: Path)
         materialize(resolve(escaping), tmp_path / "escaping" / "run")
 
 
+STAMP_PROGRAM = (
+    "import pathlib, sys; "
+    "p = pathlib.Path('input.txt'); "
+    "p.write_text(p.read_text().replace('seed', sys.argv[1]))"
+)
+
+
+def test_run_transforms_the_rendered_tree_with_formatted_expanded_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STUDY_PYTHON", sys.executable)
+    editfile = write_editfile(
+        tmp_path,
+        f'''
+from sidecar_edits import edits
+
+REQUIRES = {{"base": "base"}}
+COMMON_PARAMS = {{"corner": "tt"}}
+
+def edits_for(ctx):
+    return [
+        edits.run(
+            command=["$STUDY_PYTHON", "-c", {STAMP_PROGRAM!r}, "{{corner}}"],
+            description="stamp the corner",
+        )
+    ]
+''',
+    )
+    output = tmp_path / "run"
+    materialize(resolve(editfile), output)
+    assert (output / "input.txt").read_text(encoding="utf-8") == "tt\n"
+
+
+def test_run_fails_on_a_missing_command_unless_it_is_optional(tmp_path: Path) -> None:
+    def editfile_for(directory: Path, optional: bool) -> Path:
+        directory.mkdir()
+        return write_editfile(
+            directory,
+            f'''
+from sidecar_edits import edits
+
+REQUIRES = {{"base": "base"}}
+
+def edits_for(ctx):
+    return [
+        edits.run(
+            command=["sidecar-edits-no-such-command"],
+            description="reach a tool this site does not have",
+            optional={optional},
+        )
+    ]
+''',
+        )
+
+    strict = editfile_for(tmp_path / "strict", False)
+    with pytest.raises(EditError, match="required command not found"):
+        materialize(resolve(strict), tmp_path / "strict" / "run")
+
+    lenient = editfile_for(tmp_path / "lenient", True)
+    output = tmp_path / "lenient" / "run"
+    materialize(resolve(lenient), output)
+    assert (output / "input.txt").read_text(encoding="utf-8") == "seed\n"
+
+
 def test_materialize_refuses_existing_output(tmp_path: Path) -> None:
     plan = resolve(BASIC_EDITS)
     output = tmp_path / "run"
