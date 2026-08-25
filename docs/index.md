@@ -1,25 +1,25 @@
 # Sidecar Edits
 
-Prototype tooling for building repeatable analog simulation runs from a base
-directory and a small Python sidecar.
+Prototype tooling for resolving named inputs and typed file transformations into
+repeatable analog simulation run directories.
 
-The renderer executes an edit file, copies the base tree, applies typed edit
-operations, and writes one or more concrete run directories. The suggested edit
-file name is `edits.py`, and the interface is plain Python while still providing
-source-location error reports.
+The authoring file defines one factory that returns inspectable edits. Resolution
+builds the complete single-variant plan; materialization then copies the base and
+applies it. The CLI may loop over authored variants.
 
 ```python
 from sidecar_edits import edits
 
-BASE_DIR = "base"
+REQUIRES = {"base": "base"}
 
-EDITS = [
-    edits.replace(
-        path="input.scs",
-        old="parameters corner=seed",
-        new="parameters corner=tt",
-    ),
-]
+def edits_for(ctx):
+    return [
+        edits.replace(
+            path="input.scs",
+            old="parameters corner=seed",
+            new="parameters corner=tt",
+        ),
+    ]
 ```
 
 ## Quick Start
@@ -41,9 +41,9 @@ sidecar-render examples/basic/edits.py /tmp/sidecar_example_run
 | If you want to | Read |
 | --- | --- |
 | author an edit file, format parameters, inject sources, read errors | [User guide](user-guide.md) |
-| render many runs from one file: corners, sweeps, output layout | [Parameter sets and matrices](parameter-sets.md) |
+| choose explicit params, selectors, supplied definitions, or CLI matrices | [Parameter sets and matrices](parameter-sets.md) |
 | see it working end to end, including Excel-backed PWL sources | [Examples](examples.md) |
-| look up a helper's signature or a PWL type | [API reference](api.rst) |
+| look up authoring, rendering, edit, or PWL signatures | [API reference](api.rst) |
 | work *on* this package rather than with it | [Internals](internals.md) |
 
 ```{note}

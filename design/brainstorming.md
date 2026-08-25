@@ -90,7 +90,14 @@ scheduler or dependency graph yet.
 
 ## Render Context Script Interface
 
-Status: Future option.
+Status: Superseded 2026-08-25 by `def edits_for(ctx)`.
+
+The adopted interface deliberately differs from this procedural proposal:
+`edits_for(ctx)` builds and returns the full typed edit iterable but does not
+apply it. That retains the inspectable pre-application plan and source tracing
+identified below, while still moving declared-input reads into the factory.
+There is no coexistence mode; one authoring spelling avoids a second expression
+of the same intent.
 
 The current interface treats the edit file as a small Python program that builds
 a declarative render plan:

@@ -1,229 +1,172 @@
 # User Guide
 
-An edit file defines how a base simulation directory is transformed into rendered
-run directories. The suggested filename is `edits.py`.
+An edit file names every external input it needs and defines one function that
+builds typed file transformations. Building the list and applying it are
+separate operations, so a Python caller can inspect the complete plan before
+anything writes to the output directory.
 
-## Authoring Edits
-
-Use `from sidecar_edits import edits` and place edit objects in `EDITS`.
+## Authoring contract
 
 ```python
 from sidecar_edits import edits
 
-BASE_DIR = "base"
-
-COMMON_PARAMS = {
-    "netlist_path": "/work/netlists/rc_filter_corner_tt.scs",
-    "vdd": "1.2",
+REQUIRES = {
+    "base": "base",
+    "model_override": "assets/model_override.scs",
 }
 
-EDITS = [
-    edits.extract_subckts(
-        description="split reusable subcircuits from main netlist",
-        input="input.scs",
-        output_main="input_main.scs",
-        output_subckts="subckts.inc",
-    ),
-    edits.write_file(
-        path="generated/pwl_sources.inc",
-        content="Vstim in 0 PWL(0 0 1n {vdd})\n",
-        description="generate PWL source include",
-    ),
-    edits.append_to_file(
-        path="input_main.scs",
-        content='include "generated/pwl_sources.inc"\n',
-        description="append generated PWL include",
-    ),
-    edits.replace(
-        path="input_main.scs",
-        old='include "/seed/netlists/rc_filter.scs"',
-        new='include "{netlist_path}"',
-        description="select corner netlist",
-    ),
-]
+COMMON_PARAMS = {"corner": "tt"}
+
+def edits_for(ctx):
+    return [
+        edits.copy_file(
+            path=str(ctx.requires["model_override"]),
+            to="include/model_override.scs",
+        ),
+        edits.replace(
+            path="input.scs",
+            old="corner=seed",
+            new="corner={corner}",
+            description="select process corner",
+        ),
+    ]
 ```
 
-The `edits` namespace keeps supported operations discoverable through editor
-autocomplete and normal Python help. It holds `extract_subckts`, `copy_file`,
-`write_file`, `append_to_file`, `insert_series_source_at_instance_net`,
-`replace`, `regex_replace`, `run`, `patch`, and `apply_patch`; their signatures
-and docstrings are in the [API reference](api.rst). Raw dictionary entries in
-`EDITS` are rejected.
+`edits_for(ctx)` returns or yields `sidecar_edits.edits` objects. It does not
+apply them. There is no alternate module-level list or procedural render
+function. Returning data preserves review, dry-run inspection, source tracing,
+and the ability to refuse an invalid plan before the base tree is copied.
 
-Descriptions are optional. Use them for human intent, not for restating the
-operation name: `description="select corner netlist"` is more useful than
-`description="replace include line"`.
+The factory receives:
 
-Edits fail the render by default. The operations that shell out —
-`extract_subckts`, `run`, `patch`, and `apply_patch` — accept `optional=True`
-where skipping is genuinely acceptable, and `replace` and `regex_replace` accept
-`allow_no_match=True` where an absent target is. Neither is a way to quieten an
-edit you have not understood.
+- `ctx.requires`: every declared requirement as a resolved `Path`;
+- `ctx.params`: the one resolved variant's parameter mapping; and
+- `ctx.declarations`: the effective declaration mapping, including any
+  whole-value replacements supplied by a caller.
 
-`edits.append_to_file` appends exactly the text passed in `content`; it does not
-add newlines for you, and it fails if the target file does not already exist.
+Constructing edit objects captures the source stack. A helper called inside
+`edits_for` therefore still reports both the helper line and its factory caller.
+Raw dictionary edits are rejected.
 
-To render several runs from one edit file, see
-[Parameter Sets and Matrices](parameter-sets.md).
+## Named external inputs
 
-## PWL Tables
-
-Use `sidecar_edits.pwl` when waveform points are authored in a spreadsheet and
-the edit file should generate SPICE `PWL(...)` expressions.
-
-The table format is:
-
-- The first header cell is `#time`.
-- Every other header is the name of one generated waveform.
-- A non-empty cell emits one point for that waveform at that row's time.
-- An empty cell is skipped; it is not interpreted as zero.
-
-Example table:
-
-| #time | vin | vclk | ireset |
-| --- | --- | --- | --- |
-| 0 | 0 | 0 | |
-| 1n | 0.2 | 1.2 | |
-| 2n | | 0 | 1m |
-| 5n | 1.2 | | 0 |
-
-Load a workbook or copied spreadsheet text in the edit file, then compose the
-actual SPICE source lines explicitly:
+`REQUIRES` maps stable names to CLI defaults. Defaults resolve relative to the
+edit file after parameter and environment formatting.
 
 ```python
-from pathlib import Path
+REQUIRES = {
+    "base": "base",
+    "startup_table": "waveforms/startup.xlsx",
+    "site_model": None,
+}
+```
 
+`base` is mandatory because every render copies one authoritative base tree.
+`None` means there is no CLI default: a caller must bind that name. Python
+callers bind resolved absolute paths through `resolve(..., requires={...})`.
+Passing an undeclared name, a relative caller path, or omitting a name with no
+default raises `EditError`.
+
+Requirements are enumerable from `read(path).requirement_defaults` before the
+factory runs. Adding a new requirement is additive: it uses the same name-keyed
+mapping and appears in `ctx.requires`; there is no second path channel.
+
+## Python embedding
+
+```python
+from sidecar_edits.render import materialize, read, resolve, variants
+
+authored = read(edit_path)
+available = variants(authored)  # data only; does not build or apply edits
+
+plan = resolve(
+    authored,
+    requires={"base": base_path.resolve()},
+    selector="ss_1v62_125c",
+)
+inspect(plan.edits)
+materialize(plan, output_path, label="ss_1v62_125c")
+```
+
+`resolve` always produces exactly one variant. Embedding clients create their
+own invocations and call it once per invocation; only the CLI loops over sets or
+matrix points. See [Parameter Sets and Matrices](parameter-sets.md) for explicit
+parameters, selectors, supplied definitions, and their reuse identity.
+
+## PWL tables without import-time I/O
+
+External tables are requirements and are read inside the factory:
+
+```python
 from sidecar_edits import edits, pwl
 
-BASE_DIR = "base"
+REQUIRES = {
+    "base": "base",
+    "startup_table": "waveforms/startup.xlsx",
+}
 
-waveforms = pwl.waveforms_from_file(
-    Path(__file__).parent / "waveforms" / "startup.xlsx",
-    sheet="startup",
-)
-
-pwl_source_lines = "\n".join(
-    f"V{name} {name} 0 {waveform.render_pwl()}"
-    for name, waveform in waveforms.items()
-) + "\n"
-
-EDITS = [
-    edits.write_file(
-        path="generated/pwl_sources.inc",
-        content=pwl_source_lines,
-        description="generate PWL sources from spreadsheet",
-    ),
-    edits.append_to_file(
-        path="input.scs",
-        content='include "generated/pwl_sources.inc"\n',
-        description="include generated PWL sources",
-    ),
-]
+def edits_for(ctx):
+    waveforms = pwl.waveforms_from_file(
+        ctx.requires["startup_table"], sheet="startup"
+    )
+    source_lines = "\n".join(
+        f"V{name} {name} 0 {waveform.render_pwl()}"
+        for name, waveform in waveforms.items()
+    ) + "\n"
+    return [
+        edits.write_file(
+            path="generated/pwl_sources.inc",
+            content=source_lines,
+            description="generate startup sources",
+        ),
+        edits.append_to_file(
+            path="input.scs",
+            content='include "generated/pwl_sources.inc"\n',
+        ),
+    ]
 ```
 
-`waveforms_from_file(...)` accepts delimited text files and spreadsheet
-workbooks. If a workbook has multiple sheets, pass `sheet="..."`; the error
-lists the available sheet names. If it has one sheet, the sheet can be inferred.
-`waveforms_from_text(...)` takes a range pasted straight out of a spreadsheet
-and detects the delimiter itself.
+Importing this file defines declarations and the function; it does not open the
+workbook. Resolving it hands the factory the declared path and fingerprints can
+track that same artifact at an embedding boundary.
 
-Cell values are passed through as SPICE text, so `1.2`, `vdd`, `VDD/2` and `1m`
-all survive unparsed. `render_pwl()` wraps long expressions with the SPICE `+`
-continuation token at 88 characters; pass `wrap=False` for a single-line
-`PWL(...)`, or `line_length=...` to change the target.
+The PWL table's first header must be `#time`; remaining headers name waveforms.
+Blank cells omit points. Values remain SPICE text. `waveforms_from_text` accepts
+delimited text, and `waveforms_from_file` accepts delimited files or workbooks.
 
-The loader refuses a table it cannot read honestly rather than repairing it: a
-missing `#time` header, duplicate source column names, a row with values but an
-empty time cell, or whitespace around a header or value all raise
-`PwlTableError` naming the row. Columns that emit no points are dropped, row
-order is preserved exactly, and time values are never checked for monotonicity —
-they may be simulator parameters or expressions.
+## Edit operations
 
-See [Excel PWL Sources](examples.md#excel-pwl-sources) for a runnable example.
+The `sidecar_edits.edits` namespace exposes typed helpers for:
 
-## Parameter Formatting
+- `extract_subckts`, `copy_file`, `write_file`, and `append_to_file`;
+- `insert_series_source_at_instance_net`;
+- `replace` and `regex_replace`; and
+- `patch` and `apply_patch`.
 
-Edit fields are templates. They are formatted for each selected parameter set
-and matrix case when the edit is applied.
+Every operation is a file transformation. Arbitrary command execution is not an
+edit capability; launch simulators and workflows from the execution component.
+`patch`, `apply_patch`, and the extraction helper may invoke a tool only to
+perform their declared file transformation.
 
-```python
-edits.replace(
-    path="input.scs",
-    old="parameters corner=seed",
-    new="parameters corner={corner}",
-)
-```
+`copy_file` requires an absolute source path obtained from `ctx.requires`.
+Destination and target paths are inside the rendered tree. Parameter formatting
+uses `{name}` fields. Path fields additionally expand environment variables;
+replacement content does not, preserving simulator-side variables.
 
-Formatting rules:
+Edits fail by default. Patch and extraction operations accept `optional=True`
+only when skipping is genuinely valid. Text replacement accepts
+`allow_no_match=True` for an intentionally absent target.
 
-- Path-like fields use parameter formatting and environment-variable expansion.
-- Replacement text, generated file content, source lines, and patch text use
-  parameter formatting without environment-variable expansion.
-- Descriptions are static text and are not parameter-formatted.
+## Error reporting
 
-A parameter referenced by a field but absent from the selected parameter set
-fails the render with `missing parameter: <name>`. Which fields expand
-environment variables is listed in
-[Parameter Sets and Matrices](parameter-sets.md).
-
-## Series Source Injection
-
-Use `insert_series_source_at_instance_net` when a netlist has a uniquely named
-X instance and you want to detach one connected net and reattach it through a
-source.
-
-```python
-edits.insert_series_source_at_instance_net(
-    path="input_main.scs",
-    instance="X_SIDE_INJECT_001",
-    net="in",
-    internal_net="in__sidecar_inj",
-    source_line="Vinj {net} {internal_net} PULSE(0 1.2 0 10p 10p 4n 8n)",
-    description="inject pulse on unique instance input",
-)
-```
-
-This transforms:
-
-```spice
-X_SIDE_INJECT_001 in out vss vdd amp
-```
-
-into:
-
-```spice
-Vinj in in__sidecar_inj PULSE(0 1.2 0 10p 10p 4n 8n)
-X_SIDE_INJECT_001 in__sidecar_inj out vss vdd amp
-```
-
-Continuation lines are kept with the selected instance. The edit fails if the
-instance is missing, ambiguous, commented, or if the selected net is missing or
-appears more than once on that instance.
-
-Instance names must start with `X`. For netlists that duplicate the second
-character in instance names, a request for `XFOO` also matches `XFFOO`; if both
-forms are present the edit fails as ambiguous rather than guessing.
-
-## Error Reporting
-
-When an edit fails, the renderer reports the failing `EDITS` entry and the
-source location captured when the edit object was created.
+A failed edit reports its factory result index and construction stack:
 
 ```text
-error: EDITS[3] replace "select corner netlist" failed
-created at edits.py:18 in <module>
-reason: replace target not found in /tmp/run/input_main.scs
-```
-
-If an edit is created through a helper function, the renderer shows a short call
-chain instead of a single location:
-
-```text
-error: EDITS[1] replace failed
+error: edits_for(ctx)[1] replace "select corner" failed
 created at helpers/netlist.py:7 in model_include
-called from edits.py:15 in <module>
+called from edits.py:15 in edits_for
 reason: replace target not found in /tmp/run/input.scs
 ```
 
-Paths under the edit file directory tree are displayed relative to that
-directory; paths outside it are displayed in full.
+Paths beneath the edit-file tree are displayed relative to it; outside paths
+remain absolute.

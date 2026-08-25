@@ -30,11 +30,12 @@ def write_editfile(tmp_path: Path, edits: str, base_text: str) -> Path:
         f"""
 from sidecar_edits import edits
 
-BASE_DIR = "base"
+REQUIRES = {{"base": "base"}}
 COMMON_PARAMS = {{"vdd": "1.2"}}
-EDITS = [
+def edits_for(ctx):
+    return [
 {edits}
-]
+    ]
 """,
         encoding="utf-8",
     )
@@ -222,7 +223,7 @@ def test_insert_series_source_reports_actionable_failures(
     result = run_render(editfile_path, tmp_path / "run")
 
     assert result.returncode == 2
-    assert 'EDITS[1] insert_series_source_at_instance_net "inject pulse on unique instance input" failed' in result.stderr
+    assert 'edits_for(ctx)[1] insert_series_source_at_instance_net "inject pulse on unique instance input" failed' in result.stderr
     assert expected in result.stderr
 
 
