@@ -60,6 +60,10 @@ def edits_for(ctx):
     ]
 ```
 
+`edits_for(ctx)` may return any iterable of edit specs. Return a list for a
+fixed sequence; use a generator and `yield` when edits are conditional or
+computed from the resolved context.
+
 Defaults in `REQUIRES` resolve next to the edit file. An embedding caller binds
 resolved absolute paths by name:
 

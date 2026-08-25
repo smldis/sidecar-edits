@@ -167,6 +167,38 @@ def test_param_matrix_example_renders_named_matrix_dirs(tmp_path: Path) -> None:
     assert "parameters corner=ss vdd=1.20 temp=125" in ss.read_text(encoding="utf-8")
 
 
+def test_generator_factory_materializes_conditional_edit_by_variant(tmp_path: Path) -> None:
+    common = {"vdd": "1.20", "temp_c": 27}
+    tt_plan = resolve(
+        PARAM_MATRIX_EDITS,
+        params={
+            **common,
+            "corner": "tt",
+            "netlist_path": "/work/netlists/amp_tt.scs",
+        },
+    )
+    ss_plan = resolve(
+        PARAM_MATRIX_EDITS,
+        params={
+            **common,
+            "corner": "ss",
+            "netlist_path": "/work/netlists/amp_ss.scs",
+        },
+    )
+
+    conditional_description = "mark typical-corner preparation"
+    assert conditional_description in [edit.description for edit in tt_plan.edits]
+    assert conditional_description not in [edit.description for edit in ss_plan.edits]
+
+    tt_output = tmp_path / "tt"
+    ss_output = tmp_path / "ss"
+    materialize(tt_plan, tt_output)
+    materialize(ss_plan, ss_output)
+    marker = "* typical-corner reference configuration\n"
+    assert marker in (tt_output / "input.scs").read_text(encoding="utf-8")
+    assert marker not in (ss_output / "input.scs").read_text(encoding="utf-8")
+
+
 def test_pwl_excel_example_generates_include_from_workbook(tmp_path: Path) -> None:
     output = tmp_path / "pwl_excel_run"
     result = run_cli(PWL_EXCEL_EDITS, output)

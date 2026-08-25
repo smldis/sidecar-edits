@@ -27,7 +27,9 @@ their risk.
   `sidecar_edits.pwl`, and `sidecar_edits.render`.
 - Authoring: an edit file declares `REQUIRES` and defines exactly
   `edits_for(ctx) -> Iterable[EditSpec]`; resolving it returns a complete edit
-  tuple before materialization writes output.
+  tuple before materialization writes output. The iterable may be a returned
+  list or a generator; generators are the authoring form for conditional or
+  computed edits.
 - Python rendering: `sidecar_edits.render.read`, `variants`, `resolve`, and
   `materialize`, with caller declarations supplied through one replacement
   mapping and requirement paths bound separately by declared name.

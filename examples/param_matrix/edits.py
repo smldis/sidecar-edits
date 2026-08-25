@@ -32,18 +32,23 @@ PARAM_MATRIX = {
     "temp_c": [-40, 27, 125],
 }
 
+
 def edits_for(ctx):
-    return [
-        edits.replace(
-            description="select corner netlist",
+    yield edits.replace(
+        description="select corner netlist",
+        path="input.scs",
+        old='include "/seed/netlists/amp.scs"',
+        new='include "{netlist_path}"',
+    )
+    yield edits.replace(
+        description="write simulation parameters",
+        path="input.scs",
+        old="parameters corner=seed vdd=seed temp=seed",
+        new="parameters corner={corner} vdd={vdd} temp={temp_c}",
+    )
+    if ctx.params["corner"] == "tt":
+        yield edits.append_to_file(
+            description="mark typical-corner preparation",
             path="input.scs",
-            old='include "/seed/netlists/amp.scs"',
-            new='include "{netlist_path}"',
-        ),
-        edits.replace(
-            description="write simulation parameters",
-            path="input.scs",
-            old="parameters corner=seed vdd=seed temp=seed",
-            new="parameters corner={corner} vdd={vdd} temp={temp_c}",
-        ),
-    ]
+            content="* typical-corner reference configuration\n",
+        )
