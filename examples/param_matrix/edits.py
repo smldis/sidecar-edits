@@ -1,7 +1,7 @@
 from sidecar_edits import edits
 
 
-BASE_DIR = "base"
+REQUIRES = {"base": "base"}
 
 COMMON_PARAMS = {
     "simulator_cmd": "spectre",
@@ -32,17 +32,23 @@ PARAM_MATRIX = {
     "temp_c": [-40, 27, 125],
 }
 
-EDITS = [
-    edits.replace(
+
+def edits_for(ctx):
+    yield edits.replace(
         description="select corner netlist",
         path="input.scs",
         old='include "/seed/netlists/amp.scs"',
         new='include "{netlist_path}"',
-    ),
-    edits.replace(
+    )
+    yield edits.replace(
         description="write simulation parameters",
         path="input.scs",
         old="parameters corner=seed vdd=seed temp=seed",
         new="parameters corner={corner} vdd={vdd} temp={temp_c}",
-    ),
-]
+    )
+    if ctx.params["corner"] == "tt":
+        yield edits.append_to_file(
+            description="mark typical-corner preparation",
+            path="input.scs",
+            content="* typical-corner reference configuration\n",
+        )

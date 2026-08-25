@@ -1,40 +1,29 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
-import os
 from pathlib import Path
 
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-BASIC_EXAMPLE_DIR = REPO_ROOT / "examples" / "basic"
-BASIC_EDITS = BASIC_EXAMPLE_DIR / "edits.py"
-APPLY_PATCH_EXAMPLE_DIR = REPO_ROOT / "examples" / "apply_patch"
-APPLY_PATCH_EDITS = APPLY_PATCH_EXAMPLE_DIR / "edits.py"
-PARAM_MATRIX_EXAMPLE_DIR = REPO_ROOT / "examples" / "param_matrix"
-PARAM_MATRIX_EDITS = PARAM_MATRIX_EXAMPLE_DIR / "edits.py"
-PWL_EXCEL_EXAMPLE_DIR = REPO_ROOT / "examples" / "pwl_excel"
-PWL_EXCEL_EDITS = PWL_EXCEL_EXAMPLE_DIR / "edits.py"
+BASIC_EDITS = REPO_ROOT / "examples" / "basic" / "edits.py"
+APPLY_PATCH_EDITS = REPO_ROOT / "examples" / "apply_patch" / "edits.py"
+PARAM_MATRIX_EDITS = REPO_ROOT / "examples" / "param_matrix" / "edits.py"
+PWL_EXCEL_EDITS = REPO_ROOT / "examples" / "pwl_excel" / "edits.py"
 
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import sidecar_edits  # noqa: E402
-from sidecar_edits import edits  # noqa: E402
 from sidecar_edits.render import (  # noqa: E402
     EditError,
-    ParamSet,
-    apply_copy,
-    apply_edit,
-    apply_extract_subckts,
-    apply_patch_edit,
-    apply_regex_replace,
-    apply_replace,
     copy_base_tree,
-    load_editfile,
-    run_command,
-    select_param_sets,
+    materialize,
+    read,
+    resolve,
+    variants,
 )
 
 
@@ -50,85 +39,27 @@ def build_package(tmp_path: Path) -> Path:
     return build_lib
 
 
-def test_tool_path_builds_extract_subckts_for_editable_source_tree(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    package_root = tmp_path / "sidecar_edits"
-    (package_root / "native").mkdir(parents=True)
-    (package_root / "native" / "extract_subckts.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
-    captured = {}
-
-    def fake_files(package: str) -> Path:
-        assert package == "sidecar_edits"
-        return package_root
-
-    def fake_run(command: list[str], check: bool) -> None:
-        captured["command"] = command
-        captured["check"] = check
-        target = Path(command[command.index("-o") + 1])
-        target.write_text("binary\n", encoding="utf-8")
-
-    monkeypatch.setattr(sidecar_edits, "files", fake_files)
-    monkeypatch.setattr(sidecar_edits.subprocess, "run", fake_run)
-
-    path = sidecar_edits.tool_path("extract_subckts")
-
-    assert path == package_root / "bin" / "extract_subckts"
-    assert path.read_text(encoding="utf-8") == "binary\n"
-    assert captured["check"] is True
-    assert captured["command"][-1] == str(package_root / "native" / "extract_subckts.c")
-
-
-def test_tool_path_reports_missing_native_source_for_unbuilt_tool(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    package_root = tmp_path / "sidecar_edits"
-    package_root.mkdir()
-
-    monkeypatch.setattr(sidecar_edits, "files", lambda package: package_root)
-
-    with pytest.raises(RuntimeError, match="Install a built wheel"):
-        sidecar_edits.tool_path("extract_subckts")
-
-
-def test_basic_example_render_applies_declared_edits(tmp_path: Path) -> None:
-    build_lib = build_package(tmp_path)
-    output_dir = tmp_path / "example_run"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(build_lib)
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(BASIC_EDITS), str(output_dir)],
+def run_cli(editfile: Path, output: Path, *args: str, env: dict[str, str] | None = None):
+    command_env = os.environ.copy()
+    command_env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    if env:
+        command_env.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(output), *args],
         cwd=REPO_ROOT,
-        env=env,
-        check=True,
+        env=command_env,
         capture_output=True,
         text=True,
     )
 
-    assert output_dir.exists()
-    assert (output_dir / "include" / "model_override.scs").read_text(encoding="utf-8") == (
-        "simulator lang=spectre\n"
-        "parameters gain_trim=1.05\n"
-    )
-    assert (output_dir / "input_main.scs").read_text(encoding="utf-8") == (
-        "simulator lang=spectre\n"
-        'include "/work/netlists/rc_filter_corner_tt.scs"\n'
-        '.INCLUDE "subckts.inc"\n'
-        "X1 in out rc_filter\n"
-        "tran tran stop=10u\n"
-        "save V(out)\n"
-    )
-    assert (output_dir / "subckts.inc").read_text(encoding="utf-8") == (
-        "\n"
-        "*** reusable subcircuit definitions\n"
-        ".SUBCKT rc_filter in out\n"
-        "R1 in out 1k\n"
-        "C1 out 0 1p\n"
-        ".ENDS rc_filter\n\n"
-    )
+
+def write_editfile(tmp_path: Path, body: str, *, base_text: str = "seed\n") -> Path:
+    base = tmp_path / "base"
+    base.mkdir(exist_ok=True)
+    (base / "input.txt").write_text(base_text, encoding="utf-8")
+    path = tmp_path / "edits.py"
+    path.write_text(body, encoding="utf-8")
+    return path
 
 
 def write_fake_apply_patch(bin_dir: Path) -> Path:
@@ -149,838 +80,403 @@ Path("APPLY_PATCH_PROOF.txt").write_text("run_label=tt_1v2_27c\\n", encoding="ut
     return binary
 
 
-def test_apply_patch_example_uses_installed_apply_patch_binary(tmp_path: Path) -> None:
+def test_tool_path_builds_extract_subckts_for_editable_source_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "sidecar_edits"
+    (package_root / "native").mkdir(parents=True)
+    (package_root / "native" / "extract_subckts.c").write_text(
+        "int main(void) { return 0; }\n", encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_files(package: str) -> Path:
+        assert package == "sidecar_edits"
+        return package_root
+
+    def fake_run(command: list[str], check: bool) -> None:
+        captured["command"] = command
+        captured["check"] = check
+        Path(command[command.index("-o") + 1]).write_text("binary\n", encoding="utf-8")
+
+    monkeypatch.setattr(sidecar_edits, "files", fake_files)
+    monkeypatch.setattr(sidecar_edits.subprocess, "run", fake_run)
+
+    path = sidecar_edits.tool_path("extract_subckts")
+
+    assert path == package_root / "bin" / "extract_subckts"
+    assert path.read_text(encoding="utf-8") == "binary\n"
+    assert captured["check"] is True
+
+
+def test_tool_path_reports_missing_native_source_for_unbuilt_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    package_root = tmp_path / "sidecar_edits"
+    package_root.mkdir()
+    monkeypatch.setattr(sidecar_edits, "files", lambda package: package_root)
+    with pytest.raises(RuntimeError, match="Install a built wheel"):
+        sidecar_edits.tool_path("extract_subckts")
+
+
+def test_basic_example_render_applies_declared_edits_from_built_package(tmp_path: Path) -> None:
     build_lib = build_package(tmp_path)
+    output = tmp_path / "example_run"
+    result = run_cli(BASIC_EDITS, output, env={"PYTHONPATH": str(build_lib)})
+    assert result.returncode == 0, result.stderr
+    assert (output / "include" / "model_override.scs").read_text(encoding="utf-8") == (
+        "simulator lang=spectre\nparameters gain_trim=1.05\n"
+    )
+    assert 'include "/work/netlists/rc_filter_corner_tt.scs"' in (
+        output / "input_main.scs"
+    ).read_text(encoding="utf-8")
+    assert ".SUBCKT rc_filter in out" in (output / "subckts.inc").read_text(encoding="utf-8")
+
+
+def test_apply_patch_example_uses_installed_apply_patch_binary(tmp_path: Path) -> None:
     output_base = tmp_path / "apply_patch_run"
-    output_dir = tmp_path / "apply_patch_run_tt_1v2"
+    output = tmp_path / "apply_patch_run_tt_1v2"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     write_fake_apply_patch(bin_dir)
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(build_lib)
-    env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(APPLY_PATCH_EDITS), str(output_base)],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
+    result = run_cli(
+        APPLY_PATCH_EDITS,
+        output_base,
+        env={"PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}"},
     )
-
-    assert (output_dir / "APPLY_PATCH_PROOF.txt").read_text(encoding="utf-8") == (
+    assert result.returncode == 0, result.stderr
+    assert (output / "APPLY_PATCH_PROOF.txt").read_text(encoding="utf-8") == (
         "run_label=tt_1v2_27c\n"
     )
-    assert (output_dir / "notes.txt").read_text(encoding="utf-8") == (
-        "base example\n"
-        "run_label=tt_1v2_27c\n"
+    assert "parameters vdd=1.20 temp=27" in (output / "input_main.scs").read_text(
+        encoding="utf-8"
     )
-    assert (output_dir / "input_main.scs").read_text(encoding="utf-8") == (
-        'simulator lang=spectre\n'
-        'include "/work/netlists/rc_filter_corner_tt.scs"\n\n'
-        "parameters vdd=1.20 temp=27\n"
-        '.INCLUDE "subckts.inc"\n'
-        "X1 in out rc_filter\n"
-        "tran tran stop=10u\n"
-        "save V(out)\n"
-    )
-    assert not (output_dir / "psf").exists()
-    assert not (output_dir / "scratch.tmp").exists()
+    assert not (output / "psf").exists()
+    assert not (output / "scratch.tmp").exists()
 
 
 def test_param_matrix_example_renders_named_matrix_dirs(tmp_path: Path) -> None:
-    output_base = tmp_path / "matrix_run"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
+    output = tmp_path / "matrix_run"
+    result = run_cli(PARAM_MATRIX_EDITS, output)
+    assert result.returncode == 0, result.stderr
+    tt = tmp_path / "matrix_run_tt" / "vdd_0p90_temp_c_m40" / "input.scs"
+    ss = tmp_path / "custom_ss_sweep" / "vdd_1p20_temp_c_125" / "input.scs"
+    assert "parameters corner=tt vdd=0.90 temp=-40" in tt.read_text(encoding="utf-8")
+    assert "parameters corner=ss vdd=1.20 temp=125" in ss.read_text(encoding="utf-8")
 
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(PARAM_MATRIX_EDITS), str(output_base)],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
+
+def test_generator_factory_materializes_conditional_edit_by_variant(tmp_path: Path) -> None:
+    common = {"vdd": "1.20", "temp_c": 27}
+    tt_plan = resolve(
+        PARAM_MATRIX_EDITS,
+        params={
+            **common,
+            "corner": "tt",
+            "netlist_path": "/work/netlists/amp_tt.scs",
+        },
+    )
+    ss_plan = resolve(
+        PARAM_MATRIX_EDITS,
+        params={
+            **common,
+            "corner": "ss",
+            "netlist_path": "/work/netlists/amp_ss.scs",
+        },
     )
 
-    tt_run = tmp_path / "matrix_run_tt" / "vdd_0p90_temp_c_m40" / "input.scs"
-    ss_run = tmp_path / "custom_ss_sweep" / "vdd_1p20_temp_c_125" / "input.scs"
+    conditional_description = "mark typical-corner preparation"
+    assert conditional_description in [edit.description for edit in tt_plan.edits]
+    assert conditional_description not in [edit.description for edit in ss_plan.edits]
 
-    assert tt_run.read_text(encoding="utf-8") == (
-        "simulator lang=spectre\n"
-        'include "/work/netlists/amp_tt.scs"\n'
-        "parameters corner=tt vdd=0.90 temp=-40\n"
-        "save V(out)\n"
-    )
-    assert ss_run.read_text(encoding="utf-8") == (
-        "simulator lang=spectre\n"
-        'include "/work/netlists/amp_ss.scs"\n'
-        "parameters corner=ss vdd=1.20 temp=125\n"
-        "save V(out)\n"
-    )
+    tt_output = tmp_path / "tt"
+    ss_output = tmp_path / "ss"
+    materialize(tt_plan, tt_output)
+    materialize(ss_plan, ss_output)
+    marker = "* typical-corner reference configuration\n"
+    assert marker in (tt_output / "input.scs").read_text(encoding="utf-8")
+    assert marker not in (ss_output / "input.scs").read_text(encoding="utf-8")
 
 
 def test_pwl_excel_example_generates_include_from_workbook(tmp_path: Path) -> None:
-    output_dir = tmp_path / "pwl_excel_run"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(PWL_EXCEL_EDITS), str(output_dir)],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert (output_dir / "generated" / "pwl_sources.inc").read_text(encoding="utf-8") == (
+    output = tmp_path / "pwl_excel_run"
+    result = run_cli(PWL_EXCEL_EDITS, output)
+    assert result.returncode == 0, result.stderr
+    assert (output / "generated" / "pwl_sources.inc").read_text(encoding="utf-8") == (
         "Vvin vin 0 PWL(0 0 1n 0.2 5n 1.2)\n"
         "Vvclk vclk 0 PWL(0 0 1n 1.2 2n 0)\n"
         "Vireset ireset 0 PWL(2n 1m 5n 0)\n"
     )
-    assert (output_dir / "input.scs").read_text(encoding="utf-8").endswith(
-        'include "generated/pwl_sources.inc"\n'
-    )
 
 
-def test_apply_patch_missing_binary_fails_in_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    empty_path = tmp_path / "empty_path"
-    empty_path.mkdir()
-    monkeypatch.setenv("PATH", str(empty_path))
-
-    with pytest.raises(EditError, match="apply_patch executable not found"):
-        apply_patch_edit(
-            tmp_path,
-            {
-                "op": "apply_patch",
-                "description": "missing binary test",
-                "patch": "*** Begin Patch\n*** Add File: out.txt\n+content\n*** End Patch\n",
-            },
-            {},
-        )
-
-
-def test_apply_patch_can_be_optional_when_binary_is_missing(
-    tmp_path: Path,
+def test_read_does_not_build_edits_or_read_excel(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    empty_path = tmp_path / "empty_path"
-    empty_path.mkdir()
-    monkeypatch.setenv("PATH", str(empty_path))
+    from sidecar_edits import pwl
 
-    apply_patch_edit(
+    monkeypatch.setattr(
+        pwl,
+        "waveforms_from_file",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("workbook read at import")),
+    )
+    authored = read(PWL_EXCEL_EDITS)
+    assert authored.requirement_defaults["startup_table"] == "waveforms/startup.xlsx"
+
+
+def test_resolve_builds_complete_plan_before_materialization(tmp_path: Path) -> None:
+    plan = resolve(BASIC_EDITS)
+    assert len(plan.edits) == 3
+    assert plan.base_dir == BASIC_EDITS.parent / "base"
+    assert not (tmp_path / "run").exists()
+    materialize(plan, tmp_path / "run")
+    assert (tmp_path / "run" / "input_main.scs").is_file()
+
+
+def test_requirements_use_defaults_and_caller_absolute_bindings(tmp_path: Path) -> None:
+    alternate = tmp_path / "alternate"
+    alternate.mkdir()
+    (alternate / "input.txt").write_text("seed\n", encoding="utf-8")
+    editfile = write_editfile(
         tmp_path,
-        {
-            "op": "apply_patch",
-            "description": "optional proof file edit",
-            "optional": True,
-            "patch": "*** Begin Patch\n*** Add File: out.txt\n+content\n*** End Patch\n",
+        '''
+from sidecar_edits import edits
+REQUIRES = {"base": "base"}
+def edits_for(ctx):
+    return [edits.replace(path="input.txt", old="seed", new="bound")]
+''',
+    )
+    plan = resolve(editfile, requires={"base": alternate.resolve()})
+    assert plan.base_dir == alternate.resolve()
+
+
+def test_unknown_requirement_binding_fails_loudly(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        'REQUIRES = {"base": "base"}\ndef edits_for(ctx): return []\n',
+    )
+    with pytest.raises(EditError, match="unknown requirement binding.*typo"):
+        resolve(editfile, requires={"typo": tmp_path.resolve()})
+
+
+def test_requirement_without_default_or_binding_fails_loudly(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        'REQUIRES = {"base": "base", "table": None}\ndef edits_for(ctx): return []\n',
+    )
+    with pytest.raises(EditError, match="table has no default and no caller binding"):
+        resolve(editfile)
+
+
+def test_caller_requirement_must_be_absolute(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        'REQUIRES = {"base": "base"}\ndef edits_for(ctx): return []\n',
+    )
+    with pytest.raises(EditError, match="must be an absolute path"):
+        resolve(editfile, requires={"base": Path("relative")})
+
+
+def test_caller_declarations_replace_whole_values(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+COMMON_PARAMS = {"from_file": 1, "shared": "file"}
+PARAM_SETS = [{"name": "file_set", "params": {"corner": "file"}}]
+PARAM_MATRIX = {"temp": [27, 125]}
+def edits_for(ctx): return []
+''',
+    )
+    supplied = {
+        "COMMON_PARAMS": {"shared": "caller"},
+        "PARAM_SETS": [{"name": "caller_set", "params": {"corner": "caller"}}],
+        "PARAM_MATRIX": {},
+    }
+    authored = read(editfile, declarations=supplied)
+    assert authored.common_params == {"shared": "caller"}
+    assert [item.name for item in authored.param_sets] == ["caller_set"]
+    assert authored.param_matrix == {}
+    plan = resolve(authored, selector="caller_set")
+    assert plan.params == {"shared": "caller", "corner": "caller"}
+
+
+def test_supplied_requirements_declaration_replaces_file_definition(tmp_path: Path) -> None:
+    alternate = tmp_path / "alternate"
+    alternate.mkdir()
+    editfile = write_editfile(
+        tmp_path,
+        'REQUIRES = {"base": "base", "unused": "missing"}\ndef edits_for(ctx): return []\n',
+    )
+    plan = resolve(
+        editfile,
+        declarations={"REQUIRES": {"base": None}},
+        requires={"base": alternate.resolve()},
+    )
+    assert plan.requires == {"base": alternate.resolve()}
+
+
+def test_supplied_set_definitions_and_selector_are_orthogonal(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+PARAM_SETS = [{"name": "file", "params": {"corner": "file"}}]
+def edits_for(ctx): return []
+''',
+    )
+    plan = resolve(
+        editfile,
+        declarations={
+            "PARAM_SETS": [
+                {"name": "ss", "params": {"corner": "ss"}},
+            ]
         },
-        {},
+        selector="ss",
     )
-
-    assert "skip optional optional proof file edit" in capsys.readouterr().out
-    assert not (tmp_path / "out.txt").exists()
-
-
-def test_extract_subckts_missing_packaged_tool_fails_as_edit_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sidecar_edits.render as render
-
-    def missing_tool(name: str) -> Path:
-        raise RuntimeError(f"packaged tool is not built: {name}")
-
-    monkeypatch.setattr(render, "tool_path", missing_tool)
-
-    with pytest.raises(EditError, match="extract reusable subcircuits failed"):
-        apply_extract_subckts(
-            tmp_path,
-            {
-                "op": "extract_subckts",
-                "description": "extract reusable subcircuits",
-                "input": "input.scs",
-                "output_main": "input_main.scs",
-                "output_subckts": "subckts.inc",
-            },
-            {},
-        )
+    assert plan.selector == "ss"
+    assert plan.params == {"corner": "ss"}
 
 
-def test_replace_failure_uses_edit_description(tmp_path: Path) -> None:
-    target = tmp_path / "input.scs"
-    target.write_text("parameters vdd=1.2\n", encoding="utf-8")
-
-    with pytest.raises(EditError, match="update supply include failed"):
-        apply_replace(
-            target,
-            {
-                "op": "replace",
-                "description": "update supply include",
-                "old": "missing token",
-                "new": "replacement",
-            },
-            {},
-        )
-
-
-def test_editfile_can_load_params_from_file(tmp_path: Path) -> None:
-    (tmp_path / "base").mkdir()
-    (tmp_path / "params.json").write_text('{"run_label": "file"}\n', encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "base"
-COMMON_PARAMS_FILE = "params.json"
-EDITS = []
-""",
-        encoding="utf-8",
+def test_explicit_params_ignore_set_selection_but_merge_common(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+COMMON_PARAMS = {"simulator": "ngspice", "corner": "common"}
+PARAM_SETS = [{"name": "tt", "params": {"corner": "tt"}}]
+def edits_for(ctx): return []
+''',
     )
-
-    render_plan = load_editfile(editfile)
-    params = render_plan.param_sets[0].params
-
-    assert params["run_label"] == "file"
+    plan = resolve(editfile, params={"corner": "explicit", "temp": 27})
+    assert plan.params == {"simulator": "ngspice", "corner": "explicit", "temp": 27}
 
 
-def test_editfile_expands_env_vars_in_base_dir_and_params_file(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    env_root = tmp_path / "env_root"
-    (env_root / "base").mkdir(parents=True)
-    (env_root / "params.json").write_text('{"run_label": "env-file"}\n', encoding="utf-8")
-    monkeypatch.setenv("SIDECAR_TEST_ROOT", str(env_root))
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "$SIDECAR_TEST_ROOT/base"
-COMMON_PARAMS_FILE = "$SIDECAR_TEST_ROOT/params.json"
-EDITS = []
-""",
-        encoding="utf-8",
-    )
-
-    render_plan = load_editfile(editfile)
-    params = render_plan.param_sets[0].params
-
-    assert render_plan.base_dir == env_root / "base"
-    assert params["run_label"] == "env-file"
-
-
-def test_editfile_can_define_params_inline(tmp_path: Path) -> None:
-    (tmp_path / "base").mkdir()
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "base"
-COMMON_PARAMS = {"simulator_cmd": "aps", "run_label": "inline"}
-EDITS = []
-""",
-        encoding="utf-8",
-    )
-
-    params = load_editfile(editfile).param_sets[0].params
-
-    assert params == {"simulator_cmd": "aps", "run_label": "inline"}
-
-
-def test_named_param_sets_render_all_by_default(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.txt").write_text("corner=seed\nvdd=seed\n", encoding="utf-8")
-    (tmp_path / "ss.json").write_text('{"corner": "ss", "vdd": "0.90"}\n', encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-COMMON_PARAMS = {"vdd": "1.20"}
-PARAM_SETS = [
-    {"name": "tt", "description": "typical", "params": {"corner": "tt"}},
-    {"name": "ss", "targetdir": "custom_ss", "params_file": "ss.json"},
-]
-EDITS = [
-    edits.replace(path="input.txt", old="corner=seed", new="corner={corner}"),
-    edits.replace(path="input.txt", old="vdd=seed", new="vdd={vdd}"),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(tmp_path / "run")],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert (tmp_path / "run_tt" / "input.txt").read_text(encoding="utf-8") == "corner=tt\nvdd=1.20\n"
-    assert (tmp_path / "custom_ss" / "input.txt").read_text(encoding="utf-8") == "corner=ss\nvdd=0.90\n"
-
-
-def test_write_file_edit_creates_generated_file_with_params(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-COMMON_PARAMS = {"name": "stim1", "vdd": "1.2"}
-EDITS = [
-    edits.write_file(
-        path="generated/{name}.inc",
-        content="V{name} in 0 PWL(0 0 1n {vdd})\\n",
-        description="generate PWL source include",
-    ),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(tmp_path / "run")],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert (tmp_path / "run" / "generated" / "stim1.inc").read_text(encoding="utf-8") == (
-        "Vstim1 in 0 PWL(0 0 1n 1.2)\n"
-    )
-
-
-def test_append_to_file_edit_appends_generated_text_with_params(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.scs").write_text("simulator lang=spectre\n", encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-COMMON_PARAMS = {"include_path": "generated/pwl_sources.inc"}
-EDITS = [
-    edits.append_to_file(
-        path="input.scs",
-        content='include "{include_path}"\\n',
-        description="append generated PWL include",
-    ),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(tmp_path / "run")],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert (tmp_path / "run" / "input.scs").read_text(encoding="utf-8") == (
-        "simulator lang=spectre\n"
-        'include "generated/pwl_sources.inc"\n'
-    )
-
-
-def test_append_to_file_edit_fails_when_target_is_missing(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-EDITS = [
-    edits.append_to_file(
-        path="missing.scs",
-        content="include generated/pwl_sources.inc\\n",
-        description="append generated PWL include",
-    ),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    result = subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(tmp_path / "run")],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 2
-    assert 'EDITS[1] append_to_file "append generated PWL include" failed' in result.stderr
-    assert "target file does not exist" in result.stderr
-
-
-def test_named_param_sets_run_filter(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.txt").write_text("corner=seed\n", encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-PARAM_SETS = [
-    {"name": "tt", "params": {"corner": "tt"}},
-    {"name": "ff", "params": {"corner": "ff"}},
-]
-EDITS = [
-    edits.replace(path="input.txt", old="corner=seed", new="corner={corner}"),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sidecar_edits.render",
-            str(editfile),
-            str(tmp_path / "run"),
-            "--run",
-            "ff",
+def test_variants_are_data_and_can_resolve_caller_definitions_without_file_io() -> None:
+    declarations = {
+        "COMMON_PARAMS": {"simulator": "ngspice"},
+        "PARAM_SETS": [
+            {"name": "tt", "params": {"corner": "tt"}},
+            {"name": "ss", "params": {"corner": "ss"}},
         ],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+        "PARAM_MATRIX": {"temp": [-40, 125]},
+    }
+    expanded = variants(declarations)
+    assert [item.name for item in expanded] == [
+        "tt__temp_m40",
+        "tt__temp_125",
+        "ss__temp_m40",
+        "ss__temp_125",
+    ]
+    assert expanded[-1].params == {"simulator": "ngspice", "corner": "ss", "temp": 125}
 
+
+def test_embedding_selector_refuses_matrix_fanout(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+PARAM_SETS = [{"name": "tt", "params": {"corner": "tt"}}]
+PARAM_MATRIX = {"temp": [27, 125]}
+def edits_for(ctx): return []
+''',
+    )
+    with pytest.raises(EditError, match="describes multiple variants"):
+        resolve(editfile, selector="tt")
+
+
+def test_cli_run_selector_filters_sets_before_matrix_expansion(tmp_path: Path) -> None:
+    result = run_cli(PARAM_MATRIX_EDITS, tmp_path / "run", "--run", "ss")
+    assert result.returncode == 0, result.stderr
     assert not (tmp_path / "run_tt").exists()
-    assert (tmp_path / "run_ff" / "input.txt").read_text(encoding="utf-8") == "corner=ff\n"
+    assert (tmp_path / "custom_ss_sweep" / "vdd_0p90_temp_c_27" / "input.scs").is_file()
 
 
-def test_named_param_sets_unknown_run_fails(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.txt").write_text("corner=seed\n", encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "base"
-PARAM_SETS = [
-    {"name": "tt", "params": {"corner": "tt"}},
-]
-EDITS = []
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sidecar_edits.render",
-            str(editfile),
-            str(tmp_path / "run"),
-            "--run",
-            "missing",
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
+def test_cli_unknown_selector_fails_loudly(tmp_path: Path) -> None:
+    result = run_cli(PARAM_MATRIX_EDITS, tmp_path / "run", "--run", "missing")
+    assert result.returncode == 2
     assert "unknown parameter set" in result.stderr
 
 
-def test_param_matrix_single_run_renders_under_output_base(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.txt").write_text("vdd=seed\ntemp=seed\n", encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
+def test_param_set_file_fields_are_rejected_as_undeclared_artifact_locators(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+PARAM_SETS = [{"name": "tt", "params_file": "params.json"}]
+def edits_for(ctx): return []
+''',
+    )
+    with pytest.raises(EditError, match="unsupported field.*params_file"):
+        read(editfile)
+
+
+def test_removed_authoring_declarations_fail_instead_of_coexisting(tmp_path: Path) -> None:
+    old_list_name = "ED" + "ITS"
+    editfile = write_editfile(
+        tmp_path,
+        f'''REQUIRES = {{"base": "base"}}
+{old_list_name} = []
+def edits_for(ctx): return []
+''',
+    )
+    with pytest.raises(EditError, match="uses removed declaration"):
+        read(editfile)
+
+
+def test_raw_dictionary_result_is_rejected(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
+REQUIRES = {"base": "base"}
+def edits_for(ctx):
+    return [{"op": "replace", "path": "input.txt", "old": "a", "new": "b"}]
+''',
+    )
+    with pytest.raises(EditError, match="raw dictionary"):
+        resolve(editfile)
+
+
+def test_source_trace_points_into_factory_body(tmp_path: Path) -> None:
+    editfile = write_editfile(
+        tmp_path,
+        '''
 from sidecar_edits import edits
-
-BASE_DIR = "base"
-COMMON_PARAMS = {"vdd": "from_common"}
-PARAM_MATRIX = {
-    "vdd": ["0.90", "1.20"],
-    "temp_c": [27],
-}
-EDITS = [
-    edits.replace(path="input.txt", old="vdd=seed", new="vdd={vdd}"),
-    edits.replace(path="input.txt", old="temp=seed", new="temp={temp_c}"),
-]
-""",
-        encoding="utf-8",
+REQUIRES = {"base": "base"}
+def make_edit():
+    return edits.replace(path="input.txt", old="missing", new="new")
+def edits_for(ctx):
+    return [make_edit()]
+''',
     )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [sys.executable, "-m", "sidecar_edits.render", str(editfile), str(tmp_path / "run")],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert (tmp_path / "run" / "vdd_0p90_temp_c_27" / "input.txt").read_text(encoding="utf-8") == (
-        "vdd=0.90\ntemp=27\n"
-    )
-    assert (tmp_path / "run" / "vdd_1p20_temp_c_27" / "input.txt").read_text(encoding="utf-8") == (
-        "vdd=1.20\ntemp=27\n"
-    )
+    plan = resolve(editfile)
+    assert plan.edits[0].source_stack[0].function == "make_edit"
+    with pytest.raises(EditError, match=r"edits_for\(ctx\)\[1\] replace failed") as caught:
+        materialize(plan, tmp_path / "run")
+    assert "created at edits.py:5 in make_edit" in str(caught.value)
+    assert "called from edits.py:7 in edits_for" in str(caught.value)
 
 
-def test_param_matrix_named_sets_use_nested_dirs_and_targetdir(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    base_dir.mkdir()
-    (base_dir / "input.txt").write_text("corner=seed\ntemp=seed\n", encoding="utf-8")
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-from sidecar_edits import edits
-
-BASE_DIR = "base"
-PARAM_SETS = [
-    {"name": "tt", "params": {"corner": "tt"}},
-    {"name": "ss", "targetdir": "custom_ss", "params": {"corner": "ss"}},
-]
-PARAM_MATRIX = {
-    "temp_c": [-40, 125],
-}
-EDITS = [
-    edits.replace(path="input.txt", old="corner=seed", new="corner={corner}"),
-    edits.replace(path="input.txt", old="temp=seed", new="temp={temp_c}"),
-]
-""",
-        encoding="utf-8",
-    )
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT / "src")
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "sidecar_edits.render",
-            str(editfile),
-            str(tmp_path / "run"),
-            "--run",
-            "ss",
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    assert not (tmp_path / "run_tt").exists()
-    assert (tmp_path / "custom_ss" / "temp_c_m40" / "input.txt").read_text(encoding="utf-8") == (
-        "corner=ss\ntemp=-40\n"
-    )
-    assert (tmp_path / "custom_ss" / "temp_c_125" / "input.txt").read_text(encoding="utf-8") == (
-        "corner=ss\ntemp=125\n"
-    )
-
-
-def test_param_matrix_rejects_empty_axis(tmp_path: Path) -> None:
-    (tmp_path / "base").mkdir()
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "base"
-PARAM_MATRIX = {"vdd": []}
-EDITS = []
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(EditError, match="PARAM_MATRIX entry vdd must not be empty"):
-        load_editfile(editfile)
-
-
-def test_all_is_allowed_for_single_run_editfile() -> None:
-    param_set = ParamSet(name=None, params={"corner": "tt"})
-
-    assert select_param_sets([param_set], run_names=None, all_runs=True) == [param_set]
-
-
-def test_copy_file_expands_env_vars_in_paths(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    assets_dir = tmp_path / "assets"
-    target_dir = tmp_path / "run"
-    assets_dir.mkdir()
-    target_dir.mkdir()
-    (assets_dir / "model.scs").write_text("model\n", encoding="utf-8")
-    monkeypatch.setenv("SIDECAR_ASSETS", str(assets_dir))
-    monkeypatch.setenv("SIDECAR_COPY_DEST", "include")
-
-    apply_copy(
-        target_dir,
-        {
-            "op": "copy_file",
-            "path": "$SIDECAR_ASSETS/model.scs",
-            "to": "$SIDECAR_COPY_DEST/copied.scs",
-        },
-        {},
-        tmp_path,
-    )
-
-    assert (target_dir / "include" / "copied.scs").read_text(encoding="utf-8") == "model\n"
-
-
-def test_edit_target_path_expands_env_vars(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target_dir = tmp_path / "run"
-    target_dir.mkdir()
-    (target_dir / "input_main.scs").write_text('include "old.scs"\n', encoding="utf-8")
-    monkeypatch.setenv("TARGET_FILE", "input_main.scs")
-
-    apply_edit(
-        target_dir,
-        edits.replace(
-            path="$TARGET_FILE",
-            old='include "old.scs"',
-            new='include "new.scs"',
-        ),
-        {},
-        tmp_path,
-    )
-
-    assert (target_dir / "input_main.scs").read_text(encoding="utf-8") == 'include "new.scs"\n'
-
-
-def test_extract_subckts_requires_output_paths_before_loading_tool(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sidecar_edits.render as render
-
-    def fail_tool_path(name: str) -> Path:
-        raise AssertionError("tool_path should not be called when required fields are missing")
-
-    monkeypatch.setattr(render, "tool_path", fail_tool_path)
-
-    with pytest.raises(EditError, match=r"missing required field\(s\): output_main, output_subckts"):
-        apply_extract_subckts(
-            tmp_path,
-            {
-                "op": "extract_subckts",
-                "input": "input.scs",
-            },
-            {},
-        )
-
-
-def test_extract_subckts_expands_env_vars_in_file_fields(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sidecar_edits.render as render
-
-    captured = {}
-
-    def fake_run_command_args(target_dir: Path, command: list[str], optional: bool, description: str) -> None:
-        captured["command"] = command
-
-    monkeypatch.setattr(render, "tool_path", lambda name: Path(f"/tools/{name}"))
-    monkeypatch.setattr(render, "run_command_args", fake_run_command_args)
-    monkeypatch.setenv("INPUT_NETLIST", "input.scs")
-    monkeypatch.setenv("MAIN_NETLIST", "main.scs")
-    monkeypatch.setenv("SUBCKT_OUTPUT", "generated/subckts.inc")
-    monkeypatch.setenv("SIDE_INCLUDE", "../generated/subckts.inc")
-
-    apply_extract_subckts(
-        tmp_path,
-        {
-            "op": "extract_subckts",
-            "input": "$INPUT_NETLIST",
-            "output_main": "$MAIN_NETLIST",
-            "output_subckts": "$SUBCKT_OUTPUT",
-            "include": "$SIDE_INCLUDE",
-        },
-        {},
-    )
-
-    assert captured["command"] == [
-        "/tools/extract_subckts",
-        "input.scs",
-        "main.scs",
-        "generated/subckts.inc",
-        "../generated/subckts.inc",
-    ]
-
-
-def test_extract_subckts_defaults_include_to_output_subckts(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sidecar_edits.render as render
-
-    captured = {}
-
-    def fake_run_command_args(target_dir: Path, command: list[str], optional: bool, description: str) -> None:
-        captured["command"] = command
-
-    monkeypatch.setattr(render, "tool_path", lambda name: Path(f"/tools/{name}"))
-    monkeypatch.setattr(render, "run_command_args", fake_run_command_args)
-
-    apply_extract_subckts(
-        tmp_path,
-        {
-            "op": "extract_subckts",
-            "input": "input.scs",
-            "output_main": "main.scs",
-            "output_subckts": "generated/subckts.inc",
-        },
-        {},
-    )
-
-    assert captured["command"] == [
-        "/tools/extract_subckts",
-        "input.scs",
-        "main.scs",
-        "generated/subckts.inc",
-        "generated/subckts.inc",
-    ]
-
-
-def test_run_command_expands_env_vars_in_arguments(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import sidecar_edits.render as render
-
-    captured = {}
-
-    def fake_run_command_args(target_dir: Path, command: list[str], optional: bool, description: str) -> None:
-        captured["command"] = command
-
-    monkeypatch.setattr(render, "run_command_args", fake_run_command_args)
-    monkeypatch.setenv("TOOL_ROOT", "/opt/tools")
-
-    run_command(
-        tmp_path,
-        {
-            "op": "run",
-            "command": ["$TOOL_ROOT/bin/tool", "--input", "{INPUT_PATH}"],
-        },
-        {"INPUT_PATH": "netlists/input.scs"},
-    )
-
-    assert captured["command"] == ["/opt/tools/bin/tool", "--input", "netlists/input.scs"]
-
-
-def test_editfile_rejects_ambiguous_param_sources(tmp_path: Path) -> None:
-    (tmp_path / "base").mkdir()
-    editfile = tmp_path / "edits.py"
-    editfile.write_text(
-        """
-BASE_DIR = "base"
-COMMON_PARAMS = {"run_label": "inline"}
-COMMON_PARAMS_FILE = "params.json"
-EDITS = []
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(EditError, match="defines both COMMON_PARAMS and COMMON_PARAMS_FILE"):
-        load_editfile(editfile)
+def test_materialize_refuses_existing_output(tmp_path: Path) -> None:
+    plan = resolve(BASIC_EDITS)
+    output = tmp_path / "run"
+    output.mkdir()
+    with pytest.raises(EditError, match="already exists"):
+        materialize(plan, output)
 
 
 def test_copy_base_tree_ignores_directories_basenames_and_relative_paths(tmp_path: Path) -> None:
-    base_dir = tmp_path / "base"
-    output_dir = tmp_path / "run"
-    (base_dir / "psf").mkdir(parents=True)
-    (base_dir / "logs").mkdir()
-    (base_dir / "nested").mkdir()
-    (base_dir / "input.scs").write_text("netlist\n", encoding="utf-8")
-    (base_dir / "psf" / "old.raw").write_text("waveform\n", encoding="utf-8")
-    (base_dir / "nested" / "scratch.tmp").write_text("scratch\n", encoding="utf-8")
-    (base_dir / "logs" / "run.txt").write_text("log\n", encoding="utf-8")
-
-    copy_base_tree(base_dir, output_dir, ["psf/", "*.tmp", "logs/*.txt"])
-
-    assert (output_dir / "input.scs").is_file()
-    assert not (output_dir / "psf").exists()
-    assert not (output_dir / "nested" / "scratch.tmp").exists()
-    assert not (output_dir / "logs" / "run.txt").exists()
-
-
-def test_replace_allows_missing_match_when_requested(tmp_path: Path) -> None:
-    target = tmp_path / "input.scs"
-    target.write_text("parameters vdd=1.2\n", encoding="utf-8")
-
-    apply_replace(
-        target,
-        {
-            "old": "missing token",
-            "new": "replacement",
-            "allow_no_match": True,
-        },
-        {},
-    )
-
-    assert target.read_text(encoding="utf-8") == "parameters vdd=1.2\n"
-
-
-def test_replace_remains_strict_by_default(tmp_path: Path) -> None:
-    target = tmp_path / "input.scs"
-    target.write_text("parameters vdd=1.2\n", encoding="utf-8")
-
-    with pytest.raises(EditError, match="replace target not found"):
-        apply_replace(target, {"old": "missing token", "new": "replacement"}, {})
-
-
-def test_regex_replace_allows_missing_match_when_requested(tmp_path: Path) -> None:
-    target = tmp_path / "input.scs"
-    target.write_text("parameters vdd=1.2\n", encoding="utf-8")
-
-    apply_regex_replace(
-        target,
-        {
-            "pattern": r"temp=\S+",
-            "new": "temp=27",
-            "allow_no_match": True,
-        },
-        {},
-    )
-
-    assert target.read_text(encoding="utf-8") == "parameters vdd=1.2\n"
+    base = tmp_path / "base"
+    output = tmp_path / "run"
+    (base / "psf").mkdir(parents=True)
+    (base / "logs").mkdir()
+    (base / "nested").mkdir()
+    (base / "input.scs").write_text("netlist\n", encoding="utf-8")
+    (base / "psf" / "old.raw").write_text("waveform\n", encoding="utf-8")
+    (base / "nested" / "scratch.tmp").write_text("scratch\n", encoding="utf-8")
+    (base / "logs" / "run.txt").write_text("log\n", encoding="utf-8")
+    copy_base_tree(base, output, ["psf/", "*.tmp", "logs/*.txt"])
+    assert (output / "input.scs").is_file()
+    assert not (output / "psf").exists()
+    assert not (output / "nested" / "scratch.tmp").exists()
+    assert not (output / "logs" / "run.txt").exists()

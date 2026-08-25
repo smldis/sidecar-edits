@@ -1,136 +1,142 @@
 # Parameter Sets and Matrices
 
-Parameters are defined inside the edit file, not assembled on the command line.
-One edit file describes the study; the CLI only selects which of its runs to
-prepare.
+The CLI and Python clients share the same declarations and resolver.
+`COMMON_PARAMS`, `PARAM_SETS`, and `PARAM_MATRIX` contain literal values; paths
+to external parameter files are not a parameter mechanism because those files
+would escape `REQUIRES`.
 
-## Common Parameters
-
-For a single run, inline common parameters are enough:
-
-```python
-COMMON_PARAMS = {
-    "netlist_path": "/work/netlists/rc_filter_corner_tt.scs",
-    "vdd": "1.2",
-}
-```
-
-`COMMON_PARAMS_FILE` loads the same mapping from a JSON file next to the edit
-file instead. Defining both is an error.
-
-## Named Parameter Sets
-
-`PARAM_SETS` turns one edit file into several named runs. A set has a required
-identifier `name`, an optional `description`, an optional `targetdir`, and
-either inline `params` or a `params_file` pointing at JSON. `COMMON_PARAMS` are
-merged into every set, and set-specific values win.
+## Declarations
 
 ```python
-COMMON_PARAMS = {
-    "simulator_cmd": "spectre",
-}
+COMMON_PARAMS = {"simulator": "ngspice"}
 
 PARAM_SETS = [
     {
-        "name": "tt_1v2",
-        "description": "typical corner at 1.2 V",
-        "params_file": "params.json",
+        "name": "tt_1v80_27c",
+        "description": "typical process at 1.80 V and 27 C",
+        "params": {"process": "tt", "vdd_v": 1.80, "temp_c": 27},
     },
     {
-        "name": "ss_0v9",
-        "targetdir": "custom_ss_run",
-        "params": {
-            "netlist_path": "/work/netlists/rc_filter_ss.scs",
-            "vdd": "0.90",
-        },
+        "name": "ss_1v62_125c",
+        "targetdir": "custom_slow_run",
+        "params": {"process": "ss", "vdd_v": 1.62, "temp_c": 125},
     },
 ]
-```
 
-Names must be valid Python identifiers and must not repeat. A set that defines
-both `params` and `params_file` is an error.
-
-## Parameter Matrix
-
-`PARAM_MATRIX` renders every combination of a few explicit axes. It is applied
-after parameter-set selection, so matrix values override common and
-set-specific values for the same key, and each combination is rendered one
-level deeper.
-
-```python
 PARAM_MATRIX = {
-    "vdd": ["0.90", "1.20"],
-    "temp_c": [27, 125],
+    "load_pf": [0.5, 1.0],
 }
 ```
 
-The matrix syntax intentionally accepts explicit lists only. Generate the list
-in Python if you want sweep syntax; the edit file is already a Python program.
+Set names are unique Python identifiers. Common parameters merge beneath each
+set. Matrix axes are explicit non-empty lists, expanded in declaration order,
+and matrix values win over set/common values with the same key.
 
-## Selecting Runs
+Use `variants(read(path))` to obtain the fully expanded values as data without
+building edits or rendering. Use `variants(declarations)` when caller-owned
+definitions must be known while composing a Plan; that path reads no edit file.
 
-```bash
-sidecar-render examples/basic/edits.py /tmp/run
-sidecar-render examples/basic/edits.py /tmp/run --run tt_1v2
-sidecar-render examples/basic/edits.py /tmp/run --run tt_1v2 --run ss_0v9
-sidecar-render examples/basic/edits.py /tmp/run --all
-```
+## Three embedding modes and identity
 
-Rendering every named set is the default. `--run` selects one or more sets
-before matrix expansion, and `--all` is accepted mostly for readability. Using
-both at once is an error, as is naming a set the edit file does not define — the
-error lists the names that are available.
+An embedded `resolve` call produces one variant. Its three caller modes are:
 
-## Output Layout
+| Caller passes | In identity via | Invalidation when a corner changes |
+| --- | --- | --- |
+| explicit params | declared config | only the affected point |
+| a selector | config name plus edit-file fingerprint | every point declaring the file — coarse |
+| supplied definitions | declared config only | only the affected point |
 
-Without `PARAM_SETS`, the output argument is the run directory. With named sets
-it is a base path, and each set is written beside it as `<output>_<name>` unless
-the set gives a `targetdir`. A relative `targetdir` is resolved against the
-output path's parent; an absolute one is used as given. Matrix cases are then
-rendered one level below that.
-
-For `sidecar-render edits.py /tmp/run` with the sets and matrix above:
-
-```text
-/tmp/run_tt_1v2/vdd_0p90_temp_c_27/
-/tmp/run_tt_1v2/vdd_0p90_temp_c_125/
-/tmp/run_tt_1v2/vdd_1p20_temp_c_27/
-/tmp/run_tt_1v2/vdd_1p20_temp_c_125/
-/tmp/custom_ss_run/vdd_0p90_temp_c_27/
-/tmp/custom_ss_run/vdd_0p90_temp_c_125/
-```
-
-Matrix directory names are slugs of the key and value: `.` becomes `p`, a
-leading `-` becomes `m`, and any other run of non-identifier characters becomes
-`_`. So `temp_c = -40` renders under `temp_c_m40`.
-
-Rendering refuses to write into a directory that already exists. Remove the old
-run, or render somewhere else, rather than editing a rendered tree in place —
-the base directory stays authoritative.
-
-## Excluding Files From The Copy
-
-`COPY_IGNORE` drops paths while the base tree is copied, before any edit runs.
-It is useful for stale simulator output and scratch files that should not be
-inherited by a new run.
+### Explicit parameters
 
 ```python
-COPY_IGNORE = [
-    "psf/",
-    "*.tmp",
-]
+plan = resolve(
+    edit_path,
+    requires={"base": base_path},
+    params={"process": "ss", "vdd_v": 1.62, "temp_c": 125},
+)
 ```
 
-A pattern ending in `/` matches directories only. A pattern containing `/` is
-matched against the path relative to the base directory; otherwise it is matched
-against the file name alone. Blank lines and lines beginning with `#` are
-ignored.
+The point values must be declared operation config. They override
+`COMMON_PARAMS` and do not consult named sets or the matrix. This deliberately
+restates point values when fine-grained reuse matters.
 
-## Environment Variables In Paths
+### Selector
 
-Path-like fields expand environment variables such as `$PDK_ROOT` and
-`${RUN_ROOT}` after parameter formatting. This applies to `BASE_DIR`,
-`COMMON_PARAMS_FILE`, per-set `params_file`, the CLI output path, `targetdir`,
-edit target paths, `copy_file` source and destination paths, `extract_subckts`
-file fields, and command arguments. Replacement text is left alone, so
-simulator-side environment variables survive into the rendered netlist.
+```python
+plan = resolve(
+    edit_path,
+    requires={"base": base_path},
+    selector="ss_1v62_125c",
+)
+```
+
+The caller declares only the name; values remain authored once in the edit file
+and are covered by that file's fingerprint. This is simplest, but any edit to
+the file invalidates every invocation that declares it. A selector combined
+with a non-empty matrix is ambiguous for a single embedded invocation and is
+rejected; expand first and pass one expanded point as explicit params.
+
+### Supplied definitions, then selection
+
+```python
+caller_declarations = {
+    "PARAM_SETS": [
+        {"name": "ss", "params": {"process": "ss", "vdd_v": 1.62}},
+    ],
+}
+
+plan = resolve(
+    edit_path,
+    declarations=caller_declarations,
+    requires={"base": base_path},
+    selector="ss",
+)
+```
+
+`declarations` is one uniform channel keyed by the same uppercase names as an
+edit file. A supplied value replaces the file's whole declaration; it is not
+merged. That applies equally to `REQUIRES`, `COMMON_PARAMS`, `PARAM_SETS`, and
+`PARAM_MATRIX`. Selection is separate, so supplying a set definition and then
+naming one reads naturally.
+
+The complete supplied definition **must be declared operation config**. For the
+fine-grained behavior in the identity table, each invocation receives a
+one-item replacement list containing only its own complete set definition. If
+every invocation instead receives the full collection, changing one entry
+necessarily changes every invocation's config and invalidates them all.
+
+If a study passes a module constant or local mapping outside declared config,
+edits to that mapping are invisible to reuse and cached attempts remain falsely
+valid. The API cannot infer a value's Hedloom origin, so this is a caller
+contract, not an optimization hint.
+
+## CLI expansion and output layout
+
+```bash
+sidecar-render edits.py /tmp/run
+sidecar-render edits.py /tmp/run --run tt_1v80_27c
+sidecar-render edits.py /tmp/run --run tt_1v80_27c --run ss_1v62_125c
+sidecar-render edits.py /tmp/run --all
+```
+
+The CLI loops over all named sets by default; `--run` selects sets before matrix
+expansion. With no named sets, the output argument is the run directory. Named
+sets render beside it as `<output>_<set>`, unless `targetdir` replaces that
+parent. Matrix cases render one level below using stable slugs such as
+`temp_c_m40` and `vdd_1p20`.
+
+Existing output directories are refused. `COPY_IGNORE` patterns exclude stale
+files while copying the base. A trailing `/` matches directories, a pattern
+containing `/` matches the base-relative path, and other patterns match names.
+
+## Plan-time rule
+
+A study must not read an edit file while composing its Plan. Values read then
+are frozen into Plan declarations, while the later render may receive different
+caller declarations or requirement bindings; nothing compares the two.
+
+If a value genuinely must be known at plan time, obtain it through the same
+resolver and with the same inputs the render uses. Prefer caller-owned
+declarations with `variants(declarations)`, which performs no file I/O. Reading
+the edit file through `read` at plan time is the exceptional fallback and gives
+up the no-file-I/O property.

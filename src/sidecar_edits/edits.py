@@ -12,6 +12,7 @@ class RenderContext(Protocol):
     editfile_dir: Path
     editfile_path: Path
     params: dict[str, object]
+    requires: dict[str, Path]
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,12 @@ class CopyFileEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        source = render.resolve_editfile_path(context.editfile_dir, self.path, context.params)
+        source = Path(render.format_path_text(self.path, context.params))
+        if not source.is_absolute():
+            raise render.EditError(
+                f"{edit_description(self)} failed: copy source must come from "
+                f"ctx.requires as an absolute path: {source}"
+            )
         dest_name = render.format_path_text(self.to or source.name, context.params)
         render.apply_copy_file(context.target_dir, source, dest_name, edit_description(self))
 
@@ -184,21 +190,6 @@ class RegexReplaceEdit:
 
 
 @dataclass(frozen=True)
-class RunEdit:
-    op: Literal["run"]
-    command: list[str]
-    description: str | None
-    optional: bool
-    source_stack: tuple[SourceFrame, ...]
-
-    def apply(self, context: RenderContext) -> None:
-        from sidecar_edits import render
-
-        command = [render.format_path_text(str(arg), context.params) for arg in self.command]
-        render.run_command_args(context.target_dir, command, self.optional, edit_description(self))
-
-
-@dataclass(frozen=True)
 class PatchEdit:
     op: Literal["patch"]
     patch: str
@@ -254,7 +245,6 @@ EditSpec: TypeAlias = (
     | InsertSeriesSourceAtInstanceNetEdit
     | ReplaceEdit
     | RegexReplaceEdit
-    | RunEdit
     | PatchEdit
     | ApplyPatchEdit
 )
@@ -307,10 +297,10 @@ def copy_file(
     to: str | None = None,
     description: str | None = None,
 ) -> CopyFileEdit:
-    """Copy a file from the edit file directory into the rendered run directory.
+    """Copy a declared input file into the rendered run directory.
 
-    ``path`` is resolved relative to the directory containing the edit file unless
-    it is absolute. ``to`` is the destination path inside the rendered run
+    ``path`` must be an absolute path obtained from ``ctx.requires`` inside
+    ``edits_for(ctx)``. ``to`` is the destination path inside the rendered run
     directory; if omitted, the copied file keeps its source filename.
 
     Source and destination paths are formatted with render parameters and
@@ -318,10 +308,13 @@ def copy_file(
 
     Example::
 
-        edits.copy_file(
-            path="assets/model_override.scs",
-            to="include/model_override.scs",
-        )
+        def edits_for(ctx):
+            return [
+                edits.copy_file(
+                    path=str(ctx.requires["model_override"]),
+                    to="include/model_override.scs",
+                ),
+            ]
     """
     return CopyFileEdit(
         op="copy_file",
@@ -520,37 +513,6 @@ def regex_replace(
     )
 
 
-def run(
-    *,
-    command: list[str],
-    description: str | None = None,
-    optional: bool = False,
-) -> RunEdit:
-    """Run an external command in the rendered run directory.
-
-    Each command argument is converted to text, formatted with render
-    parameters, and expanded for environment variables. The command runs with
-    the rendered run directory as the current working directory.
-
-    Set ``optional=True`` only when it is acceptable to skip the command if it is
-    missing or exits unsuccessfully.
-
-    Example::
-
-        edits.run(
-            command=["./run_sim.sh", "{corner}"],
-            description="run simulator setup script",
-        )
-    """
-    return RunEdit(
-        op="run",
-        command=command,
-        description=description,
-        optional=optional,
-        source_stack=_capture_source_stack(),
-    )
-
-
 def patch(
     *,
     patch: str,
@@ -631,7 +593,6 @@ def is_edit_spec(value: object) -> bool:
             InsertSeriesSourceAtInstanceNetEdit,
             ReplaceEdit,
             RegexReplaceEdit,
-            RunEdit,
             PatchEdit,
             ApplyPatchEdit,
         ),

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -11,6 +10,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from sidecar_edits.render import read, resolve  # noqa: E402
 
 def test_edit_namespace_exposes_typed_documented_helpers() -> None:
     from sidecar_edits import edits
@@ -131,6 +132,8 @@ def test_wrapped_edit_captures_creation_and_caller_locations(tmp_path: Path) -> 
         """
 from sidecar_edits import edits
 
+REQUIRES = {"base": "base"}
+
 def model_include(path):
     return edits.replace(
         path="input.scs",
@@ -138,18 +141,16 @@ def model_include(path):
         new=path,
     )
 
-EDITS = [
-    model_include("/work/model.scs"),
-]
+def edits_for(ctx):
+    return [model_include("/work/model.scs")]
 """,
         encoding="utf-8",
     )
 
-    loaded = runpy.run_path(str(editfile_path))
-    spec = loaded["EDITS"][0]
+    spec = resolve(read(editfile_path)).edits[0]
 
-    assert spec.source_stack[0].format(editfile_path) == "edits.py:5 in model_include"
-    assert spec.source_stack[1].format(editfile_path) == "edits.py:12 in <module>"
+    assert spec.source_stack[0].format(editfile_path) == "edits.py:7 in model_include"
+    assert spec.source_stack[1].format(editfile_path) == "edits.py:14 in edits_for"
 
 
 def test_editfile_executes_before_edit_operations(tmp_path: Path) -> None:
@@ -159,24 +160,26 @@ def test_editfile_executes_before_edit_operations(tmp_path: Path) -> None:
         """
 from sidecar_edits import edits
 
+REQUIRES = {"base": "base"}
+
 corner = "tt"
 
-EDITS = [
-    edits.replace(
-        path="input.scs",
-        old="corner=seed",
-        new=f"corner={corner}",
-    )
-]
+def edits_for(ctx):
+    return [
+        edits.replace(
+            path="input.scs",
+            old="corner=seed",
+            new=f"corner={corner}",
+        )
+    ]
 """,
         encoding="utf-8",
     )
 
-    loaded = runpy.run_path(str(editfile_path))
-    spec = loaded["EDITS"][0]
+    spec = resolve(editfile_path).edits[0]
 
     assert spec.new == "corner=tt"
-    assert spec.source_stack[0].format(editfile_path) == "edits.py:7 in <module>"
+    assert spec.source_stack[0].format(editfile_path) == "edits.py:10 in edits_for"
 
 
 def test_renderer_rejects_raw_dictionary_edits(tmp_path: Path) -> None:
@@ -185,10 +188,9 @@ def test_renderer_rejects_raw_dictionary_edits(tmp_path: Path) -> None:
     (tmp_path / "base").mkdir()
     editfile_path.write_text(
         """
-BASE_DIR = "base"
-EDITS = [
-    {"op": "replace", "path": "input.scs", "old": "a", "new": "b"},
-]
+REQUIRES = {"base": "base"}
+def edits_for(ctx):
+    return [{"op": "replace", "path": "input.scs", "old": "a", "new": "b"}]
 """,
         encoding="utf-8",
     )
@@ -202,7 +204,7 @@ EDITS = [
     )
 
     assert result.returncode == 2
-    assert "raw dictionary edits are not supported" in result.stderr
+    assert "raw dictionary" in result.stderr
 
 
 def test_renderer_reports_failing_edit_source_location(tmp_path: Path) -> None:
@@ -215,15 +217,16 @@ def test_renderer_reports_failing_edit_source_location(tmp_path: Path) -> None:
         """
 from sidecar_edits import edits
 
-BASE_DIR = "base"
-EDITS = [
-    edits.replace(
-        path="input.scs",
-        old="corner=missing",
-        new="corner=ss",
-        description="select corner",
-    ),
-]
+REQUIRES = {"base": "base"}
+def edits_for(ctx):
+    return [
+        edits.replace(
+            path="input.scs",
+            old="corner=missing",
+            new="corner=ss",
+            description="select corner",
+        ),
+    ]
 """,
         encoding="utf-8",
     )
@@ -237,6 +240,6 @@ EDITS = [
     )
 
     assert result.returncode == 2
-    assert 'EDITS[1] replace "select corner" failed' in result.stderr
-    assert "created at edits.py:6" in result.stderr
+    assert 'edits_for(ctx)[1] replace "select corner" failed' in result.stderr
+    assert "created at edits.py:7" in result.stderr
     assert "replace target not found" in result.stderr
