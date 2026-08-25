@@ -726,6 +726,70 @@ def apply_copy_file(target_dir: Path, source: Path, dest_name: str, description:
     shutil.copy2(source, destination)
 
 
+def apply_rename_file(
+    target_dir: Path,
+    pattern: str,
+    destination: str,
+    allow_no_match: bool,
+    description: str,
+) -> None:
+    try:
+        expression = re.compile(pattern)
+    except re.error as exc:
+        raise EditError(
+            f"{description} failed: invalid rename pattern {pattern!r}: {exc}"
+        ) from exc
+
+    matched: list[tuple[str, Path, re.Match[str]]] = []
+    for item in sorted(target_dir.rglob("*")):
+        if not item.is_file():
+            continue
+        relative = item.relative_to(target_dir).as_posix()
+        found = expression.fullmatch(relative)
+        if found is not None:
+            matched.append((relative, item, found))
+
+    if not matched:
+        if allow_no_match:
+            return
+        raise EditError(
+            f"{description} failed: rename pattern matched no file: {pattern}"
+        )
+    if len(matched) > 1:
+        candidates = ", ".join(relative for relative, _, _ in matched)
+        raise EditError(
+            f"{description} failed: rename pattern {pattern} matched "
+            f"{len(matched)} files: {candidates}"
+        )
+
+    relative, source, found = matched[0]
+    try:
+        expanded = found.expand(destination)
+    except (re.error, IndexError) as exc:
+        raise EditError(
+            f"{description} failed: invalid rename destination {destination!r}: {exc}"
+        ) from exc
+
+    target = target_dir / expanded
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(target_dir.resolve())
+    except ValueError:
+        raise EditError(
+            f"{description} failed: rename destination leaves the run directory: {expanded}"
+        ) from None
+    if resolved == source.resolve():
+        raise EditError(
+            f"{description} failed: rename destination is the source file: {relative}"
+        )
+    if target.exists():
+        raise EditError(
+            f"{description} failed: rename destination already exists: {expanded}"
+        )
+    ensure_parent(target)
+    source.rename(target)
+
+
 def apply_write_file(target_dir: Path, path: str, content: str) -> None:
     destination = target_dir / path
     ensure_parent(destination)

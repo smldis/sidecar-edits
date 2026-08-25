@@ -138,7 +138,7 @@ delimited text, and `waveforms_from_file` accepts delimited files or workbooks.
 
 The `sidecar_edits.edits` namespace exposes typed helpers for:
 
-- `extract_subckts`, `copy_file`, `write_file`, and `append_to_file`;
+- `extract_subckts`, `copy_file`, `rename_file`, `write_file`, and `append_to_file`;
 - `insert_series_source_at_instance_net`;
 - `replace` and `regex_replace`; and
 - `patch` and `apply_patch`.
@@ -149,6 +149,13 @@ edit capability; launch simulators and workflows from the execution component.
 perform their declared file transformation.
 
 `copy_file` requires an absolute source path obtained from `ctx.requires`.
+`rename_file` instead selects a file the base copy already placed in the
+rendered tree: its `pattern` is a regular expression matched with `re.fullmatch`
+against paths relative to the run directory, exactly one file must match, and
+the edit names the candidates when several do. That pattern is used verbatim,
+so quantifiers such as `{1,3}` are not read as parameter fields; the
+destination is formatted normally and then expanded against the match, so `\1`
+carries a captured group into the new name.
 Destination and target paths are inside the rendered tree. Parameter formatting
 uses `{name}` fields. Path fields additionally expand environment variables;
 replacement content does not, preserving simulator-side variables.

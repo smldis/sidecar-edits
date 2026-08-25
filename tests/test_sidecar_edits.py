@@ -457,6 +457,90 @@ def edits_for(ctx):
     assert "called from edits.py:7 in edits_for" in str(caught.value)
 
 
+def write_rename_editfile(tmp_path: Path, names: list[str], edit_call: str) -> Path:
+    base = tmp_path / "base"
+    (base / "netlist").mkdir(parents=True)
+    for name in names:
+        (base / name).write_text("netlist\n", encoding="utf-8")
+    path = tmp_path / "edits.py"
+    path.write_text(
+        f'''
+from sidecar_edits import edits
+
+REQUIRES = {{"base": "base"}}
+COMMON_PARAMS = {{"corner": "tt"}}
+
+def edits_for(ctx):
+    return [{edit_call}]
+''',
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_rename_file_carries_captured_groups_into_the_new_name(tmp_path: Path) -> None:
+    editfile = write_rename_editfile(
+        tmp_path,
+        ["netlist/ota_ac.cir"],
+        r'edits.rename_file(pattern=r"netlist/ota_(\w+)\.cir", to=r"netlist/\1_{corner}.cir")',
+    )
+    output = tmp_path / "run"
+    materialize(resolve(editfile), output)
+    assert (output / "netlist" / "ac_tt.cir").read_text(encoding="utf-8") == "netlist\n"
+    assert not (output / "netlist" / "ota_ac.cir").exists()
+
+
+def test_rename_file_refuses_an_ambiguous_pattern_and_names_the_candidates(
+    tmp_path: Path,
+) -> None:
+    editfile = write_rename_editfile(
+        tmp_path,
+        ["netlist/ota_ac.cir", "netlist/ota_tran.cir"],
+        r'edits.rename_file(pattern=r"netlist/ota_.*\.cir", to="netlist/deck.cir")',
+    )
+    with pytest.raises(EditError, match="matched 2 files") as caught:
+        materialize(resolve(editfile), tmp_path / "run")
+    assert "netlist/ota_ac.cir, netlist/ota_tran.cir" in str(caught.value)
+
+
+def test_rename_file_fails_on_no_match_unless_it_is_allowed(tmp_path: Path) -> None:
+    strict = write_rename_editfile(
+        tmp_path / "strict",
+        ["netlist/ota_ac.cir"],
+        r'edits.rename_file(pattern=r"netlist/absent\.cir", to="netlist/deck.cir")',
+    )
+    with pytest.raises(EditError, match="matched no file"):
+        materialize(resolve(strict), tmp_path / "strict" / "run")
+
+    lenient = write_rename_editfile(
+        tmp_path / "lenient",
+        ["netlist/ota_ac.cir"],
+        r'edits.rename_file(pattern=r"netlist/absent\.cir", to="netlist/deck.cir", '
+        r"allow_no_match=True)",
+    )
+    output = tmp_path / "lenient" / "run"
+    materialize(resolve(lenient), output)
+    assert (output / "netlist" / "ota_ac.cir").is_file()
+
+
+def test_rename_file_refuses_an_occupied_or_escaping_destination(tmp_path: Path) -> None:
+    occupied = write_rename_editfile(
+        tmp_path / "occupied",
+        ["netlist/ota_ac.cir", "netlist/deck.cir"],
+        r'edits.rename_file(pattern=r"netlist/ota_ac\.cir", to="netlist/deck.cir")',
+    )
+    with pytest.raises(EditError, match="destination already exists"):
+        materialize(resolve(occupied), tmp_path / "occupied" / "run")
+
+    escaping = write_rename_editfile(
+        tmp_path / "escaping",
+        ["netlist/ota_ac.cir"],
+        r'edits.rename_file(pattern=r"netlist/ota_ac\.cir", to="../stolen.cir")',
+    )
+    with pytest.raises(EditError, match="leaves the run directory"):
+        materialize(resolve(escaping), tmp_path / "escaping" / "run")
+
+
 def test_materialize_refuses_existing_output(tmp_path: Path) -> None:
     plan = resolve(BASIC_EDITS)
     output = tmp_path / "run"

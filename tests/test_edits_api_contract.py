@@ -69,6 +69,27 @@ def test_extract_subckts_requires_named_outputs_and_defaults_include_to_output_s
         edits.extract_subckts(input="input.scs", output="input_main.scs", subckts="subckts.inc")
 
 
+def test_rename_file_helper_returns_typed_edit_object() -> None:
+    from sidecar_edits import edits
+
+    spec = edits.rename_file(
+        pattern=r"netlist/ota_(\w+)\.cir",
+        to=r"netlist/\1.cir",
+        description="drop the ota_ prefix",
+    )
+
+    assert spec.op == "rename_file"
+    assert spec.pattern == r"netlist/ota_(\w+)\.cir"
+    assert spec.to == r"netlist/\1.cir"
+    assert spec.description == "drop the ota_ prefix"
+    assert spec.allow_no_match is False
+    assert edits.is_edit_spec(spec)
+    assert spec.source_stack[0].path == Path(__file__).resolve()
+
+    with pytest.raises(TypeError):
+        edits.rename_file(path="netlist/ota_ac.cir", to="netlist/ac.cir")
+
+
 def test_write_file_helper_returns_typed_edit_object() -> None:
     from sidecar_edits import edits
 

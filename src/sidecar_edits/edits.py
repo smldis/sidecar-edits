@@ -81,6 +81,27 @@ class CopyFileEdit:
 
 
 @dataclass(frozen=True)
+class RenameFileEdit:
+    op: Literal["rename_file"]
+    pattern: str
+    to: str
+    description: str | None
+    allow_no_match: bool
+    source_stack: tuple[SourceFrame, ...]
+
+    def apply(self, context: RenderContext) -> None:
+        from sidecar_edits import render
+
+        render.apply_rename_file(
+            context.target_dir,
+            self.pattern,
+            render.format_path_text(self.to, context.params),
+            self.allow_no_match,
+            edit_description(self),
+        )
+
+
+@dataclass(frozen=True)
 class WriteFileEdit:
     op: Literal["write_file"]
     path: str
@@ -240,6 +261,7 @@ class ApplyPatchEdit:
 EditSpec: TypeAlias = (
     ExtractSubcktsEdit
     | CopyFileEdit
+    | RenameFileEdit
     | WriteFileEdit
     | AppendToFileEdit
     | InsertSeriesSourceAtInstanceNetEdit
@@ -321,6 +343,49 @@ def copy_file(
         path=path,
         to=to,
         description=description,
+        source_stack=_capture_source_stack(),
+    )
+
+
+def rename_file(
+    *,
+    pattern: str,
+    to: str,
+    description: str | None = None,
+    allow_no_match: bool = False,
+) -> RenameFileEdit:
+    """Rename one file already present in the rendered run directory.
+
+    ``pattern`` is a regular expression matched with ``re.fullmatch`` against
+    every regular file's path relative to the run directory, written with
+    forward slashes. Exactly one file must match: the edit fails and names the
+    candidates if several do, because silently renaming one of two files is the
+    failure this operation exists to prevent. ``allow_no_match=True`` accepts an
+    absent file; ambiguity has no such escape.
+
+    The pattern is used verbatim. It is not formatted with render parameters and
+    does not expand environment variables, so quantifiers such as ``{1,3}`` mean
+    what they say. ``to`` is formatted with render parameters and environment
+    variables, then expanded against the match, so ``\\1`` and ``\\g<name>``
+    carry captured groups into the new name.
+
+    ``to`` is a path inside the run directory. Parent directories are created;
+    an existing destination is refused rather than overwritten, as is a
+    destination outside the run directory.
+
+    Example::
+
+        edits.rename_file(
+            pattern=r"netlist/ota_(\\w+)\\.cir",
+            to=r"netlist/\\1_{corner}.cir",
+        )
+    """
+    return RenameFileEdit(
+        op="rename_file",
+        pattern=pattern,
+        to=to,
+        description=description,
+        allow_no_match=allow_no_match,
         source_stack=_capture_source_stack(),
     )
 
@@ -588,6 +653,7 @@ def is_edit_spec(value: object) -> bool:
         (
             ExtractSubcktsEdit,
             CopyFileEdit,
+            RenameFileEdit,
             WriteFileEdit,
             AppendToFileEdit,
             InsertSeriesSourceAtInstanceNetEdit,
