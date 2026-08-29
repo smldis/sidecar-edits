@@ -27,6 +27,7 @@ def edits_for(ctx):
             path="input.scs",
             old="corner=seed",
             new="corner={corner}",
+            interpolate=True,
             description="select process corner",
         ),
     ]
@@ -160,12 +161,45 @@ keep the command a pure function of the run directory.
 rendered tree: its `pattern` is a regular expression matched with `re.fullmatch`
 against paths relative to the run directory, exactly one file must match, and
 the edit names the candidates when several do. That pattern is used verbatim,
-so quantifiers such as `{1,3}` are not read as parameter fields; the
-destination is formatted normally and then expanded against the match, so `\1`
-carries a captured group into the new name.
-Destination and target paths are inside the rendered tree. Parameter formatting
-uses `{name}` fields. Path fields additionally expand environment variables;
-replacement content does not, preserving simulator-side variables.
+so quantifiers such as `{1,3}` are not read as parameter fields; the destination
+is expanded against the match, so `\1` carries a captured group into the new
+name. Set `interpolate=True` if that destination also contains render-parameter
+fields.
+Destination and target paths are inside the rendered tree.
+
+Every edit argument that supports formatting is verbatim by default. Set
+`interpolate=True` when authored arguments contain `{name}` fields that should
+be replaced with render parameters. Set `expand_env=True` when `$VAR` or
+`${VAR}` should expand from the environment. The two flags are independent;
+when both are true, parameter substitution happens first and environment
+expansion second. One flag pair covers every formatted argument on the edit, so
+`interpolate=True` on `replace` applies to `path`, `old`, and `new`, while the
+same flag on `run` applies to every command argument.
+
+This explicit opt-in prevents content the author did not write -- such as a
+file read from disk, a generated deck, or a vendor netlist -- from being
+silently changed when a brace happens to name a defined render parameter.
+No formatted argument acts unless its edit enables the corresponding flag.
+
+For example, a declared netlist can be inserted into a rendered file without
+interpreting its SPICE braces as parameter fields:
+
+```python
+REQUIRES = {
+    "base": "base",
+    "vendor_netlist": "vendor/input.scs",
+}
+
+def edits_for(ctx):
+    vendor_text = ctx.requires["vendor_netlist"].read_text(encoding="utf-8")
+    return [
+        edits.replace(
+            path="input.scs",
+            old="* VENDOR NETLIST GOES HERE",
+            new=vendor_text,
+        ),
+    ]
+```
 
 Edits fail by default. The command, patch, and extraction operations accept
 `optional=True` only when skipping is genuinely valid. Text replacement accepts

@@ -530,6 +530,21 @@ def format_path_text(value: str, params: Mapping[str, object]) -> str:
     return os.path.expandvars(format_text(value, params))
 
 
+def format_edit_text(
+    value: str,
+    params: Mapping[str, object],
+    *,
+    interpolate: bool,
+    expand_env: bool,
+) -> str:
+    """Apply the independently requested edit-authoring substitutions."""
+    if interpolate:
+        value = format_text(value, params)
+    if expand_env:
+        value = os.path.expandvars(value)
+    return value
+
+
 def resolve_editfile_path(base_dir: Path, value: str, params: Mapping[str, object]) -> Path:
     path = Path(format_path_text(value, params))
     if path.is_absolute():

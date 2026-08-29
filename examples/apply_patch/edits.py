@@ -44,16 +44,19 @@ def edits_for(ctx):
             path="input_main.scs",
             old='include "/seed/netlists/rc_filter.scs"',
             new='include "{netlist_path}"',
+            interpolate=True,
         ),
         edits.regex_replace(
             path="input_main.scs",
             pattern=r"parameters vdd=\S+ temp=\S+",
             new="parameters vdd={vdd} temp={temp_c}",
+            interpolate=True,
         ),
         edits.replace(
             path="run_sim.sh",
             old="spectre input_main.scs -format psfxl -raw ./psf",
             new="{simulator_cmd} input_main.scs -format psfxl -raw ./psf",
+            interpolate=True,
         ),
         edits.patch(
             description="add run label to notes",
@@ -65,6 +68,7 @@ def edits_for(ctx):
  base example
 +run_label={run_label}
 """,
+            interpolate=True,
         ),
         edits.apply_patch(
             description="add apply_patch proof file",
@@ -73,5 +77,6 @@ def edits_for(ctx):
 +run_label={run_label}
 *** End Patch
 """,
+            interpolate=True,
         ),
     ]

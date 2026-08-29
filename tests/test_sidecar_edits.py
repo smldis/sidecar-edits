@@ -482,7 +482,8 @@ def test_rename_file_carries_captured_groups_into_the_new_name(tmp_path: Path) -
     editfile = write_rename_editfile(
         tmp_path,
         ["netlist/ota_ac.cir"],
-        r'edits.rename_file(pattern=r"netlist/ota_(\w+)\.cir", to=r"netlist/\1_{corner}.cir")',
+        r'edits.rename_file(pattern=r"netlist/ota_(\w+)\.cir", '
+        r'to=r"netlist/\1_{corner}.cir", interpolate=True)',
     )
     output = tmp_path / "run"
     materialize(resolve(editfile), output)
@@ -565,6 +566,8 @@ def edits_for(ctx):
     return [
         edits.run(
             command=["$STUDY_PYTHON", "-c", {STAMP_PROGRAM!r}, "{{corner}}"],
+            interpolate=True,
+            expand_env=True,
             description="stamp the corner",
         )
     ]

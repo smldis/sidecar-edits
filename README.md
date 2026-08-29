@@ -56,6 +56,7 @@ def edits_for(ctx):
             path="input.scs",
             old="corner=seed",
             new="corner={corner}",
+            interpolate=True,
         ),
     ]
 ```

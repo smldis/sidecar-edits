@@ -28,5 +28,6 @@ def edits_for(ctx):
             path="input_main.scs",
             old='include "/seed/netlists/rc_filter.scs"',
             new='include "{netlist_path}"',
+            interpolate=True,
         ),
     ]

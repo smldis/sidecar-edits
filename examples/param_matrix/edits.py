@@ -39,12 +39,14 @@ def edits_for(ctx):
         path="input.scs",
         old='include "/seed/netlists/amp.scs"',
         new='include "{netlist_path}"',
+        interpolate=True,
     )
     yield edits.replace(
         description="write simulation parameters",
         path="input.scs",
         old="parameters corner=seed vdd=seed temp=seed",
         new="parameters corner={corner} vdd={vdd} temp={temp_c}",
+        interpolate=True,
     )
     if ctx.params["corner"] == "tt":
         yield edits.append_to_file(

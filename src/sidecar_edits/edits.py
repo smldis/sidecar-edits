@@ -39,6 +39,8 @@ class ExtractSubcktsEdit:
     output_main: str
     output_subckts: str
     include: str | None
+    interpolate: bool
+    expand_env: bool
     description: str | None
     optional: bool
     source_stack: tuple[SourceFrame, ...]
@@ -46,12 +48,18 @@ class ExtractSubcktsEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        output_subckts = render.format_path_text(self.output_subckts, context.params)
-        include = render.format_path_text(self.include or output_subckts, context.params)
+        format_arg = lambda value: render.format_edit_text(
+            value,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
+        output_subckts = format_arg(self.output_subckts)
+        include = format_arg(self.include or output_subckts)
         render.run_extract_subckts(
             context.target_dir,
-            render.format_path_text(self.input, context.params),
-            render.format_path_text(self.output_main, context.params),
+            format_arg(self.input),
+            format_arg(self.output_main),
             output_subckts,
             include,
             self.optional,
@@ -64,19 +72,33 @@ class CopyFileEdit:
     op: Literal["copy_file"]
     path: str
     to: str | None
+    interpolate: bool
+    expand_env: bool
     description: str | None
     source_stack: tuple[SourceFrame, ...]
 
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        source = Path(render.format_path_text(self.path, context.params))
+        source = Path(
+            render.format_edit_text(
+                self.path,
+                context.params,
+                interpolate=self.interpolate,
+                expand_env=self.expand_env,
+            )
+        )
         if not source.is_absolute():
             raise render.EditError(
                 f"{edit_description(self)} failed: copy source must come from "
                 f"ctx.requires as an absolute path: {source}"
             )
-        dest_name = render.format_path_text(self.to or source.name, context.params)
+        dest_name = render.format_edit_text(
+            self.to or source.name,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
         render.apply_copy_file(context.target_dir, source, dest_name, edit_description(self))
 
 
@@ -85,6 +107,8 @@ class RenameFileEdit:
     op: Literal["rename_file"]
     pattern: str
     to: str
+    interpolate: bool
+    expand_env: bool
     description: str | None
     allow_no_match: bool
     source_stack: tuple[SourceFrame, ...]
@@ -95,7 +119,12 @@ class RenameFileEdit:
         render.apply_rename_file(
             context.target_dir,
             self.pattern,
-            render.format_path_text(self.to, context.params),
+            render.format_edit_text(
+                self.to,
+                context.params,
+                interpolate=self.interpolate,
+                expand_env=self.expand_env,
+            ),
             self.allow_no_match,
             edit_description(self),
         )
@@ -106,14 +135,22 @@ class WriteFileEdit:
     op: Literal["write_file"]
     path: str
     content: str
+    interpolate: bool
+    expand_env: bool
     description: str | None
     source_stack: tuple[SourceFrame, ...]
 
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        path = render.format_path_text(self.path, context.params)
-        content = render.format_text(self.content, context.params)
+        format_arg = lambda value: render.format_edit_text(
+            value,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
+        path = format_arg(self.path)
+        content = format_arg(self.content)
         render.apply_write_file(context.target_dir, path, content)
 
 
@@ -122,14 +159,22 @@ class AppendToFileEdit:
     op: Literal["append_to_file"]
     path: str
     content: str
+    interpolate: bool
+    expand_env: bool
     description: str | None
     source_stack: tuple[SourceFrame, ...]
 
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        path = render.format_path_text(self.path, context.params)
-        content = render.format_text(self.content, context.params)
+        format_arg = lambda value: render.format_edit_text(
+            value,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
+        path = format_arg(self.path)
+        content = format_arg(self.content)
         render.apply_append_to_file(context.target_dir, path, content, edit_description(self))
 
 
@@ -141,13 +186,20 @@ class InsertSeriesSourceAtInstanceNetEdit:
     net: str
     internal_net: str
     source_line: str
+    interpolate: bool
+    expand_env: bool
     description: str | None
     source_stack: tuple[SourceFrame, ...]
 
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        target = context.target_dir / render.format_path_text(self.path, context.params)
+        target = context.target_dir / render.format_edit_text(
+            self.path,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
         source_params = context.params | {
             "net": self.net,
             "internal_net": self.internal_net,
@@ -157,7 +209,12 @@ class InsertSeriesSourceAtInstanceNetEdit:
             self.instance,
             self.net,
             self.internal_net,
-            render.format_text(self.source_line, source_params),
+            render.format_edit_text(
+                self.source_line,
+                source_params,
+                interpolate=self.interpolate,
+                expand_env=self.expand_env,
+            ),
             edit_description(self),
         )
 
@@ -168,6 +225,8 @@ class ReplaceEdit:
     path: str
     old: str
     new: str
+    interpolate: bool
+    expand_env: bool
     description: str | None
     allow_no_match: bool
     source_stack: tuple[SourceFrame, ...]
@@ -175,11 +234,17 @@ class ReplaceEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        target = context.target_dir / render.format_path_text(self.path, context.params)
+        format_arg = lambda value: render.format_edit_text(
+            value,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
+        target = context.target_dir / format_arg(self.path)
         render.apply_replace_text(
             target,
-            render.format_text(self.old, context.params),
-            render.format_text(self.new, context.params),
+            format_arg(self.old),
+            format_arg(self.new),
             self.allow_no_match,
             edit_description(self),
         )
@@ -191,6 +256,8 @@ class RegexReplaceEdit:
     path: str
     pattern: str
     new: str
+    interpolate: bool
+    expand_env: bool
     count: int
     description: str | None
     allow_no_match: bool
@@ -199,11 +266,17 @@ class RegexReplaceEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        target = context.target_dir / render.format_path_text(self.path, context.params)
+        format_arg = lambda value: render.format_edit_text(
+            value,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
+        target = context.target_dir / format_arg(self.path)
         render.apply_regex_replace_text(
             target,
             self.pattern,
-            render.format_text(self.new, context.params),
+            format_arg(self.new),
             self.count,
             self.allow_no_match,
             edit_description(self),
@@ -214,6 +287,8 @@ class RegexReplaceEdit:
 class RunEdit:
     op: Literal["run"]
     command: list[str]
+    interpolate: bool
+    expand_env: bool
     description: str | None
     optional: bool
     source_stack: tuple[SourceFrame, ...]
@@ -221,7 +296,15 @@ class RunEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        command = [render.format_path_text(str(arg), context.params) for arg in self.command]
+        command = [
+            render.format_edit_text(
+                str(arg),
+                context.params,
+                interpolate=self.interpolate,
+                expand_env=self.expand_env,
+            )
+            for arg in self.command
+        ]
         render.run_command_args(context.target_dir, command, self.optional, edit_description(self))
 
 
@@ -229,6 +312,8 @@ class RunEdit:
 class PatchEdit:
     op: Literal["patch"]
     patch: str
+    interpolate: bool
+    expand_env: bool
     strip: int
     description: str | None
     optional: bool
@@ -237,7 +322,12 @@ class PatchEdit:
     def apply(self, context: RenderContext) -> None:
         from sidecar_edits import render
 
-        patch_text = render.format_text(self.patch, context.params)
+        patch_text = render.format_edit_text(
+            self.patch,
+            context.params,
+            interpolate=self.interpolate,
+            expand_env=self.expand_env,
+        )
         render.run_external_patch(
             context.target_dir,
             patch_text,
@@ -251,6 +341,8 @@ class PatchEdit:
 class ApplyPatchEdit:
     op: Literal["apply_patch"]
     patch: str
+    interpolate: bool
+    expand_env: bool
     binary: str | None
     command: list[str] | None
     description: str | None
@@ -262,11 +354,33 @@ class ApplyPatchEdit:
 
         command = None
         if self.command is not None:
-            command = [render.format_path_text(str(arg), context.params) for arg in self.command]
+            command = [
+                render.format_edit_text(
+                    str(arg),
+                    context.params,
+                    interpolate=self.interpolate,
+                    expand_env=self.expand_env,
+                )
+                for arg in self.command
+            ]
         render.apply_patch_text(
             context.target_dir,
-            render.format_text(self.patch, context.params),
-            render.format_path_text(self.binary, context.params) if self.binary is not None else None,
+            render.format_edit_text(
+                self.patch,
+                context.params,
+                interpolate=self.interpolate,
+                expand_env=self.expand_env,
+            ),
+            (
+                render.format_edit_text(
+                    self.binary,
+                    context.params,
+                    interpolate=self.interpolate,
+                    expand_env=self.expand_env,
+                )
+                if self.binary is not None
+                else None
+            ),
             command,
             self.optional,
             edit_description(self),
@@ -294,6 +408,8 @@ def extract_subckts(
     output_main: str,
     output_subckts: str,
     include: str | None = None,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     optional: bool = False,
 ) -> ExtractSubcktsEdit:
@@ -305,7 +421,9 @@ def extract_subckts(
     subckt definitions. If ``include`` is omitted, it defaults to
     ``output_subckts``.
 
-    Path fields are formatted with render parameters and environment variables.
+    Path fields are used verbatim by default. Set ``interpolate=True`` for
+    render-parameter substitution and ``expand_env=True`` for environment-
+    variable expansion; the flags cover every path field on this edit.
     Set ``optional=True`` only when it is acceptable to skip extraction if the
     helper cannot run.
 
@@ -323,6 +441,8 @@ def extract_subckts(
         output_main=output_main,
         output_subckts=output_subckts,
         include=include,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         optional=optional,
         source_stack=_capture_source_stack(),
@@ -333,6 +453,8 @@ def copy_file(
     *,
     path: str,
     to: str | None = None,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
 ) -> CopyFileEdit:
     """Copy a declared input file into the rendered run directory.
@@ -341,8 +463,10 @@ def copy_file(
     ``edits_for(ctx)``. ``to`` is the destination path inside the rendered run
     directory; if omitted, the copied file keeps its source filename.
 
-    Source and destination paths are formatted with render parameters and
-    environment variables. The edit fails if the source file does not exist.
+    Source and destination paths are used verbatim by default. Set
+    ``interpolate=True`` for render-parameter substitution and
+    ``expand_env=True`` for environment-variable expansion; the flags cover
+    both paths. The edit fails if the source file does not exist.
 
     Example::
 
@@ -358,6 +482,8 @@ def copy_file(
         op="copy_file",
         path=path,
         to=to,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         source_stack=_capture_source_stack(),
     )
@@ -367,6 +493,8 @@ def rename_file(
     *,
     pattern: str,
     to: str,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     allow_no_match: bool = False,
 ) -> RenameFileEdit:
@@ -381,9 +509,10 @@ def rename_file(
 
     The pattern is used verbatim. It is not formatted with render parameters and
     does not expand environment variables, so quantifiers such as ``{1,3}`` mean
-    what they say. ``to`` is formatted with render parameters and environment
-    variables, then expanded against the match, so ``\\1`` and ``\\g<name>``
-    carry captured groups into the new name.
+    what they say. ``to`` is also verbatim by default; set ``interpolate=True``
+    for render-parameter substitution and ``expand_env=True`` for environment-
+    variable expansion. It is then expanded against the match, so ``\\1`` and
+    ``\\g<name>`` carry captured groups into the new name.
 
     ``to`` is a path inside the run directory. Parent directories are created;
     an existing destination is refused rather than overwritten, as is a
@@ -394,12 +523,15 @@ def rename_file(
         edits.rename_file(
             pattern=r"netlist/ota_(\\w+)\\.cir",
             to=r"netlist/\\1_{corner}.cir",
+            interpolate=True,
         )
     """
     return RenameFileEdit(
         op="rename_file",
         pattern=pattern,
         to=to,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         allow_no_match=allow_no_match,
         source_stack=_capture_source_stack(),
@@ -410,6 +542,8 @@ def write_file(
     *,
     path: str,
     content: str,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
 ) -> WriteFileEdit:
     """Write generated text to a file in the rendered run directory.
@@ -417,21 +551,26 @@ def write_file(
     The destination ``path`` is inside the rendered run directory. Parent
     directories are created automatically, and existing files are overwritten.
 
-    ``path`` is formatted with render parameters and environment variables.
-    ``content`` is formatted with render parameters but does not expand
-    environment variables.
+    ``path`` and ``content`` are used verbatim by default. Set
+    ``interpolate=True`` to substitute render parameters and ``expand_env=True``
+    to expand environment variables in both fields. Keeping interpolation off prevents a file read
+    from disk, a generated deck, or a vendor netlist from being silently changed
+    when its braces happen to name a render parameter.
 
     Example::
 
         edits.write_file(
             path="generated/pwl_sources.inc",
             content="Vstim in 0 PWL(0 0 1n {vdd})\\n",
+            interpolate=True,
         )
     """
     return WriteFileEdit(
         op="write_file",
         path=path,
         content=content,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         source_stack=_capture_source_stack(),
     )
@@ -441,6 +580,8 @@ def append_to_file(
     *,
     path: str,
     content: str,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
 ) -> AppendToFileEdit:
     """Append generated text to an existing file in the rendered run directory.
@@ -448,9 +589,11 @@ def append_to_file(
     The target ``path`` must already exist in the rendered run directory. The
     renderer appends exactly ``content``; it does not add a newline for you.
 
-    ``path`` is formatted with render parameters and environment variables.
-    ``content`` is formatted with render parameters but does not expand
-    environment variables.
+    ``path`` and ``content`` are used verbatim by default. Set
+    ``interpolate=True`` to substitute render parameters and ``expand_env=True``
+    to expand environment variables in both fields. Keeping interpolation off prevents a file read
+    from disk, a generated deck, or a vendor netlist from being silently changed
+    when its braces happen to name a render parameter.
 
     Example::
 
@@ -463,6 +606,8 @@ def append_to_file(
         op="append_to_file",
         path=path,
         content=content,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         source_stack=_capture_source_stack(),
     )
@@ -475,6 +620,8 @@ def insert_series_source_at_instance_net(
     net: str,
     internal_net: str,
     source_line: str,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
 ) -> InsertSeriesSourceAtInstanceNetEdit:
     """Insert a source in series with one net on a uniquely named X instance.
@@ -484,10 +631,15 @@ def insert_series_source_at_instance_net(
     of ``net`` in that instance text with ``internal_net``. Continuation lines
     are kept with the selected instance text.
 
-    ``source_line`` is formatted with normal render parameters plus ``net`` and
-    ``internal_net``. The first version rejects commented instance statements
-    containing ``$``, ``;``, or ``*``. It also fails if the instance is missing
-    or ambiguous, or if the selected net is missing or repeated on that instance.
+    ``path`` and ``source_line`` are used verbatim by default. Set ``interpolate=True`` to
+    substitute normal render parameters plus ``net`` and ``internal_net`` in an
+    authored template, and set ``expand_env=True`` to expand environment
+    variables in both fields. Keeping interpolation off prevents a line read from disk,
+    generated with a deck, or taken from a vendor netlist from being silently
+    changed when its braces happen to name a render parameter. The first version
+    rejects commented instance statements containing ``$``, ``;``, or ``*``.
+    It also fails if the instance is missing or ambiguous, or if the selected net
+    is missing or repeated on that instance.
 
     Instance names must start with ``X``. For netlists that duplicate the second
     character in instance names, a request for ``XFOO`` may also match
@@ -504,6 +656,7 @@ def insert_series_source_at_instance_net(
                 "Vinj {net} {internal_net} "
                 "PULSE(0 1.2 0 10p 10p 4n 8n)"
             ),
+            interpolate=True,
         )
     """
     if not instance.lower().startswith("x"):
@@ -515,6 +668,8 @@ def insert_series_source_at_instance_net(
         net=net,
         internal_net=internal_net,
         source_line=source_line,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         source_stack=_capture_source_stack(),
     )
@@ -525,14 +680,18 @@ def replace(
     path: str,
     old: str,
     new: str,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     allow_no_match: bool = False,
 ) -> ReplaceEdit:
     """Replace all occurrences of literal text in a rendered file.
 
-    ``path`` is inside the rendered run directory. ``old`` and ``new`` are
-    formatted with render parameters before replacement. Environment variables
-    are expanded in ``path`` only, not in replacement text.
+    ``path``, ``old``, and ``new`` are used verbatim by default. Set
+    ``interpolate=True`` to substitute render parameters and ``expand_env=True``
+    to expand environment variables in all three fields. Keeping interpolation off prevents a file
+    read from disk, a generated deck, or a vendor netlist from being silently
+    changed when its braces happen to name a render parameter.
 
     The edit fails if ``old`` is not found. Set ``allow_no_match=True`` when an
     absent target is acceptable.
@@ -543,6 +702,7 @@ def replace(
             path="input.scs",
             old="parameters corner=seed",
             new="parameters corner={corner}",
+            interpolate=True,
         )
     """
     return ReplaceEdit(
@@ -550,6 +710,8 @@ def replace(
         path=path,
         old=old,
         new=new,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         allow_no_match=allow_no_match,
         source_stack=_capture_source_stack(),
@@ -562,14 +724,21 @@ def regex_replace(
     pattern: str,
     new: str,
     count: int = 0,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     allow_no_match: bool = False,
 ) -> RegexReplaceEdit:
     """Replace text in a rendered file using a regular expression.
 
-    ``pattern`` is passed to Python ``re.subn`` with ``re.MULTILINE``. ``new`` is
-    formatted with render parameters before replacement. ``count=0`` means
-    replace all matches.
+    ``pattern`` is passed verbatim to Python ``re.subn`` with ``re.MULTILINE``.
+    ``path`` and ``new`` are also verbatim by default. Set ``interpolate=True``
+    to substitute render parameters and ``expand_env=True`` to expand
+    environment variables in those two fields. Keeping interpolation off
+    prevents a file read from disk, a generated deck, or a vendor netlist from
+    being silently changed when its braces happen to name a render parameter.
+    ``count=0`` means replace all matches. The regular-expression ``pattern`` is
+    always literal with respect to parameter formatting.
 
     The edit fails if the pattern does not match. Set ``allow_no_match=True``
     when an absent match is acceptable.
@@ -580,6 +749,7 @@ def regex_replace(
             path="input.scs",
             pattern=r"^parameters .*",
             new="parameters vdd={vdd}",
+            interpolate=True,
         )
     """
     return RegexReplaceEdit(
@@ -588,6 +758,8 @@ def regex_replace(
         pattern=pattern,
         new=new,
         count=count,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         allow_no_match=allow_no_match,
         source_stack=_capture_source_stack(),
@@ -597,6 +769,8 @@ def regex_replace(
 def run(
     *,
     command: list[str],
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     optional: bool = False,
 ) -> RunEdit:
@@ -604,10 +778,12 @@ def run(
 
     The escape hatch for a transformation this vocabulary does not name: a
     site's own netlist munger, an awk one-liner, a generator script. Each
-    argument is converted to text, formatted with render parameters, and
-    expanded for environment variables. The command runs with the rendered run
-    directory as its working directory, and a non-zero exit fails the edit with
-    the command's own stderr.
+    argument is converted to text and otherwise used verbatim by default. Set
+    ``interpolate=True`` to substitute render parameters in every argument and
+    ``expand_env=True`` to expand environment variables in every argument. When
+    both are set, parameter substitution happens first. The command runs with
+    the rendered run directory as its working directory, and a non-zero exit
+    fails the edit with the command's own stderr.
 
     It is not a way to launch simulators or evaluate results; those run a
     materialized directory rather than building one. What it gives up is
@@ -621,12 +797,16 @@ def run(
 
         edits.run(
             command=["$PDK_TOOLS/bin/retarget", "input.scs", "{corner}"],
+            interpolate=True,
+            expand_env=True,
             description="retarget the deck to this corner",
         )
     """
     return RunEdit(
         op="run",
         command=command,
+        interpolate=interpolate,
+        expand_env=expand_env,
         description=description,
         optional=optional,
         source_stack=_capture_source_stack(),
@@ -637,14 +817,21 @@ def patch(
     *,
     patch: str,
     strip: int = 0,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     optional: bool = False,
 ) -> PatchEdit:
     """Apply a unified diff with the system patch command.
 
-    ``patch`` is formatted with render parameters and sent to ``patch -p{strip}``
-    in the rendered run directory. Use this for normal unified diffs when the
-    system ``patch`` command is available.
+    ``patch`` is used verbatim by default and sent to ``patch -p{strip}`` in the
+    rendered run directory. Set ``interpolate=True`` to substitute render
+    parameters and ``expand_env=True`` to expand environment variables in it.
+    Keeping interpolation off prevents
+    a patch read from disk, generated with a deck, or supplied with a vendor
+    netlist from being silently changed when its braces happen to name a render
+    parameter. Use this for normal unified diffs when the system ``patch``
+    command is available.
 
     Set ``optional=True`` only when it is acceptable to skip the patch if the
     command is missing or the patch fails.
@@ -659,6 +846,8 @@ def patch(
     return PatchEdit(
         op="patch",
         patch=patch,
+        interpolate=interpolate,
+        expand_env=expand_env,
         strip=strip,
         description=description,
         optional=optional,
@@ -671,13 +860,20 @@ def apply_patch(
     patch: str,
     binary: str = "apply_patch",
     command: list[str] | None = None,
+    interpolate: bool = False,
+    expand_env: bool = False,
     description: str | None = None,
     optional: bool = False,
 ) -> ApplyPatchEdit:
     """Apply an apply_patch patch in the rendered run directory.
 
-    ``patch`` is formatted with render parameters and sent to the configured
-    ``apply_patch`` command in the rendered run directory. By default the
+    ``patch``, ``binary``, and every custom ``command`` argument are used
+    verbatim by default. Set ``interpolate=True`` to substitute render parameters
+    and ``expand_env=True`` to expand environment variables in all of them.
+    The patch is sent to the configured ``apply_patch`` command in the rendered
+    run directory. Keeping interpolation off prevents a patch read from disk,
+    generated with a deck, or supplied with a vendor netlist from being silently
+    changed when its braces happen to name a render parameter. By default the
     renderer looks for an ``apply_patch`` executable on ``PATH``. Pass
     ``binary=...`` to choose another executable, or ``command=[...]`` to provide
     the full command.
@@ -694,6 +890,8 @@ def apply_patch(
     return ApplyPatchEdit(
         op="apply_patch",
         patch=patch,
+        interpolate=interpolate,
+        expand_env=expand_env,
         binary=binary if command is None else None,
         command=command,
         description=description,

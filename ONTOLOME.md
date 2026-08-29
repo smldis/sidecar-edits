@@ -38,6 +38,10 @@ their risk.
   its effective `REQUIRES` declaration.
 - Materialized output: copied and edited run directories; the base remains
   authoritative.
+- Every edit argument that supports formatting preserves content verbatim by
+  default. One flag pair per edit independently opts all such arguments into
+  render-parameter interpolation and environment-variable expansion, in that
+  order when both are enabled.
 - Build contract: the C helper source is package data and is compiled by the
   package build or lazily through the installed package.
 

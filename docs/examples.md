@@ -48,7 +48,11 @@ The file declares `startup_table` with default
 `waveforms/startup.xlsx`. Its `edits_for(ctx)` reads
 `ctx.requires["startup_table"]`, converts the `startup` sheet to PWL source
 lines, and returns write/append edits. Importing or calling `read` on the module
-does not open the workbook.
+does not open the workbook. Text payloads are now verbatim by default. These
+generated write/append payloads need no parameter interpolation; authored
+templates opt in with `interpolate=True`, and arguments that need environment
+expansion opt in with `expand_env=True`. The user guide shows the corresponding
+declared-netlist pattern and the rule shared by all formatted edit arguments.
 
 ```{literalinclude} ../examples/pwl_excel/edits.py
 :language: python
