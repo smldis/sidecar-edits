@@ -1,5 +1,10 @@
 # Sidecar Edits Ontology
 
+This is the ongoing self-study of the component rooted here. Briefly inhabit
+its perspective as you work: what are you learning about what it is, why it
+exists, and what it might become? Help this account evolve when you have
+something useful to add.
+
 ## Purpose and scope
 
 Sidecar Edits turns named input paths and typed Python edit declarations into
